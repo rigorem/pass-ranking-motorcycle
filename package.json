@@ -1,0 +1,15 @@
+{
+  "name": "passeranking",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pässeranking Dolomiten – Motorradpässe nach Fahrspaß und Ambiente",
+  "scripts": {
+    "dev": "vercel dev",
+    "seed": "node scripts/seed.mjs"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.39.0",
+    "@vercel/blob": "^2.8.0"
+  }
+}
