@@ -9,7 +9,9 @@ export const redis = new Redis({ url, token });
 const IDS = 'passes:ids';
 const REV = 'passes:rev';
 const key = id => 'pass:' + id;
-const FIELDS = ['de', 'intl', 'lad', 'alt', 'region', 'fun', 'amb', 'note', 'photos', 'order', 'lat', 'lon'];
+const FIELDS = ['de', 'intl', 'lad', 'alt', 'region', 'fun', 'amb', 'note', 'photos', 'order', 'lat', 'lon',
+  // Aus dem Straßenverlauf abgeleitet, nicht von Hand gepflegt.
+  'km', 'curves', 'hairpins', 'ref'];
 
 // Redis gibt Hash-Felder locker typisiert zurück, deshalb hier einmal zentral
 // in die Form bringen, die das Frontend erwartet.
@@ -32,7 +34,11 @@ function shape(id, raw) {
     photos,
     order: num(raw.order) ?? 0,
     lat: num(raw.lat),
-    lon: num(raw.lon)
+    lon: num(raw.lon),
+    km: num(raw.km),
+    curves: num(raw.curves),
+    hairpins: num(raw.hairpins),
+    ref: raw.ref ? String(raw.ref) : ''
   };
 }
 

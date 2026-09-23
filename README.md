@@ -76,7 +76,13 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
    - `MAPTILER_KEY` – für die Kartenbilder, kostenloser Schlüssel von
      [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln leer
    - optional `SESSION_SECRET` (`openssl rand -hex 32`)
-   - optional `MAPTILER_STYLE`, voreingestellt `outdoor-v2`
+   - optional `MAPTILER_STYLE`, voreingestellt `streets-v4`
+
+   Der Schlüssel wird nur auf dem Server benutzt und erreicht den Browser nie.
+   In den Schlüsseleinstellungen bei MapTiler bleiben die **Allowed HTTP
+   origins deshalb am besten leer**: eine Herkunftssperre schützt hier nichts
+   und lehnt Serveraufrufe ab. Wer sie trotzdem setzt, trägt die eigene
+   Adresse ein, die App schickt sie als Referer mit.
 4. Deployen.
 5. Pässe einspielen:
    ```sh
@@ -126,10 +132,18 @@ Mundart wie eure eigenen Einträge (OSM schreibt „Ju de Frara“, ihr
 
 ## Karte und Streckenverlauf
 
-Jede Passkarte hat links neben dem Schild eine Kachel. Darin steht das erste
-eigene Foto, und solange es keines gibt, ein Kartenbild des Passes. Ein Tipp
-darauf öffnet die Streckenansicht: dieselbe Karte größer, mit der Passstraße
-und ihren Kehren, dazu ein Knopf, der den Pass in der Karten-App öffnet.
+Jede Passkarte hat links neben dem Schild eine Kachel mit dem Streckenverlauf:
+die Passstraße mit ihren Kehren, über eine Karte gelegt. Eigene Fotos stehen
+weiter unten im Streifen – beim Scrollen hilft die Form der Straße beim
+Wiedererkennen mehr als ein Ausschnitt Himmel. Ein Tipp auf die Kachel öffnet
+dieselbe Karte größer, dazu einen Knopf in die Karten-App.
+
+Unter der Region steht, was die Straße ausmacht, aus dem Verlauf gerechnet:
+Straßennummer, Länge, Kurven, Kehren und Kurven pro Kilometer – beim Stilfser
+Joch etwa `SS38 · 16,9 km · 62 Kurven · 46 Kehren · 3,7 Kurven/km`. Als Kurve
+zählt eine zusammenhängende Richtungsänderung ab 35°, als Kehre eine ab 120°.
+Die Zahlen erscheinen, sobald das Kartenbild einmal gebaut wurde, und stehen
+danach am Pass.
 
 Das Kartenbild kommt von MapTiler, der Straßenverlauf aus OpenStreetMap.
 Beides wird pro Pass genau einmal geholt und landet dann im privaten

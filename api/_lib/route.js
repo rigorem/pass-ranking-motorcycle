@@ -129,6 +129,46 @@ function simplify(points, tolerance) {
   return points.filter((_, i) => keep[i]);
 }
 
+// Länge der Linie in Metern.
+function lengthOf(points) {
+  let m = 0;
+  for (let i = 1; i < points.length; i++) m += metersBetween(points[i - 1], points[i]);
+  return m;
+}
+
+// Kurven zählen. Aus jedem Punktepaar wird eine Fahrtrichtung, aus je zwei
+// Richtungen eine Änderung. Aufeinanderfolgende Änderungen mit demselben
+// Vorzeichen gehören zur selben Kurve und werden aufsummiert – sonst zählt
+// eine lange Kehre als zwanzig kleine Knicke.
+function curvesIn(points) {
+  const flat = project(points);
+  const headings = [];
+  for (let i = 1; i < flat.length; i++) {
+    const dx = flat[i].x - flat[i - 1].x, dy = flat[i].y - flat[i - 1].y;
+    if (dx || dy) headings.push(Math.atan2(dy, dx) * 180 / Math.PI);
+  }
+
+  const runs = [];
+  let sum = 0, sign = 0;
+  for (let i = 1; i < headings.length; i++) {
+    let d = headings[i] - headings[i - 1];
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    const s = Math.sign(d);
+    // Fast geradeaus: die laufende Kurve ist zu Ende.
+    if (Math.abs(d) < 3) { if (sum) runs.push(sum); sum = 0; sign = 0; continue; }
+    if (s !== sign && sum) { runs.push(sum); sum = 0; }
+    sign = s;
+    sum += Math.abs(d);
+  }
+  if (sum) runs.push(sum);
+
+  return {
+    curves: runs.filter(v => v >= 35).length,
+    hairpins: runs.filter(v => v >= 120).length
+  };
+}
+
 // Google-Polyline, Genauigkeit 5 – das Format, das die Kartendienste verstehen.
 export function encodePolyline(points) {
   let lastLat = 0, lastLon = 0, out = '';
@@ -146,7 +186,7 @@ export function encodePolyline(points) {
   return out;
 }
 
-// Liefert die Punkte der Passstraße, vom einen Talende bis zum anderen.
+// Liefert die Passstraße samt Kennzahlen, vom einen Talende bis zum anderen.
 export async function routeFor(lat, lon) {
   return buildFromWays(await askOverpass(lat, lon), lat, lon);
 }
@@ -175,5 +215,21 @@ export function buildFromWays(ways, lat, lon) {
     tol *= 1.5;
     simplified = simplify(points, tol);
   }
-  return simplified;
+
+  // Gezählt wird auf einer fein, aber rauschfrei vereinfachten Linie: die
+  // rohen OSM-Stützpunkte wackeln genug, um Kurven zu erfinden.
+  const forCounting = simplify(points, 4);
+  const { curves, hairpins } = curvesIn(forCounting);
+  const metres = lengthOf(points);
+
+  return {
+    points: simplified,
+    stats: {
+      km: Math.round(metres / 100) / 10,
+      curves,
+      hairpins,
+      ref: w.tags?.ref || '',
+      road: w.tags?.name || ''
+    }
+  };
 }

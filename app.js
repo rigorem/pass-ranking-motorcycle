@@ -190,6 +190,7 @@ function render(changed = EMPTY) {
           </div></div>
         </div>
         ${p.region ? `<p class="region">${esc(p.region)}</p>` : ''}
+        ${facts(p)}
         <div class="ratings">
           ${rateRow(p, 'fun', 'Fahrspaß')}
           ${rateRow(p, 'amb', 'Ambiente')}
@@ -226,25 +227,34 @@ function hasPlace(p) {
   return typeof p.lat === 'number' && typeof p.lon === 'number';
 }
 
-// Die Kachel neben dem Schild: das erste eigene Foto, sonst das Kartenbild.
-// Passe ohne beides bekommen einen ruhigen Platzhalter, damit die Karten in
-// der Liste nicht unterschiedlich hoch werden.
+// Die Kachel neben dem Schild zeigt den Streckenverlauf, nicht die eigenen
+// Fotos – die stehen unten im Streifen. Beim Scrollen hilft die Form der
+// Straße beim Wiedererkennen mehr als ein Ausschnitt Himmel.
 function cover(p) {
-  const photo = (p.photos || [])[0];
-  if (photo) {
-    return `<button class="cover" aria-label="Foto vom ${esc(p.de)} ansehen">
-      <img src="/api/photos/${encodeURIComponent(photo)}" alt="Foto vom ${esc(p.de)}" loading="lazy"
-           data-photo="${esc(photo)}" data-pass="${esc(p.id)}"></button>`;
+  if (!hasPlace(p)) return '<span class="cover blank" aria-hidden="true"></span>';
+  return `<a class="cover" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener"
+    data-map="${esc(p.id)}" aria-label="Strecke über den ${esc(p.de)} ansehen">
+    <img src="/api/map/${encodeURIComponent(p.id)}" alt="" loading="lazy" data-map="${esc(p.id)}"
+         onerror="this.closest('.cover').classList.add('blank')">
+    <svg class="cover-pin" viewBox="0 0 24 24" aria-hidden="true"><path
+      d="M12 2c-3.9 0-7 3.1-7 7 0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></a>`;
+}
+
+// Was die Straße ausmacht, aus dem Verlauf gerechnet: Länge, Kurven, Kehren.
+// Erscheint, sobald das Kartenbild einmal gebaut wurde.
+function facts(p) {
+  const bits = [];
+  if (p.ref) bits.push(esc(p.ref));
+  if (p.km) bits.push(`${String(p.km).replace('.', ',')} km`);
+  if (p.curves) {
+    bits.push(p.curves === 1 ? '1 Kurve' : `${p.curves} Kurven`);
+    if (p.hairpins) bits.push(p.hairpins === 1 ? '1 Kehre' : `${p.hairpins} Kehren`);
+    if (p.km) {
+      const perKm = Math.round((p.curves / p.km) * 10) / 10;
+      if (perKm >= 1) bits.push(`${String(perKm).replace('.', ',')} Kurven/km`);
+    }
   }
-  if (hasPlace(p)) {
-    return `<a class="cover" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener"
-      data-map="${esc(p.id)}" aria-label="Strecke über den ${esc(p.de)} ansehen">
-      <img src="/api/map/${encodeURIComponent(p.id)}" alt="" loading="lazy" data-map="${esc(p.id)}"
-           onerror="this.closest('.cover').classList.add('blank')">
-      <svg class="cover-pin" viewBox="0 0 24 24" aria-hidden="true"><path
-        d="M12 2c-3.9 0-7 3.1-7 7 0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></a>`;
-  }
-  return '<span class="cover blank" aria-hidden="true"></span>';
+  return bits.length ? `<p class="facts">${bits.join(' · ')}</p>` : '';
 }
 
 /* --------------------------------------------------------- Schreiben --- */

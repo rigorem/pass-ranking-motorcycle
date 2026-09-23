@@ -1,5 +1,5 @@
 import { guard } from '../_lib/auth.js';
-import { getPass, redis } from '../_lib/store.js';
+import { getPass, patchPass, redis } from '../_lib/store.js';
 import { routeFor, encodePolyline } from '../_lib/route.js';
 import { put, get as getBlob } from '@vercel/blob';
 
@@ -10,7 +10,7 @@ import { put, get as getBlob } from '@vercel/blob';
 // Beim Einfügen ins Dashboard rutscht leicht ein Leerzeichen oder Zeilenumbruch
 // mit; kodiert landet der dann als %20 im Schlüssel und der Dienst lehnt ab.
 const KEY = () => (process.env.MAPTILER_KEY || '').trim();
-const STYLE = (process.env.MAPTILER_STYLE || 'outdoor-v2').trim();
+const STYLE = (process.env.MAPTILER_STYLE || 'streets-v4').trim();
 const STROKE = 'C94F83';
 
 const SIZES = {
@@ -39,14 +39,24 @@ async function polylineFor(id, pass) {
   try {
     const cached = await redis.get(routeKey(id));
     if (cached === 'none') return { enc: null, settled: true };
-    if (cached) return { enc: String(cached), settled: true };
+    if (cached) {
+      const v = typeof cached === 'string' ? JSON.parse(cached) : cached;
+      return { enc: v.enc, settled: true };
+    }
   } catch { /* ohne Cache halt frisch */ }
 
   try {
-    const points = await routeFor(pass.lat, pass.lon);
-    const enc = points && points.length > 3 ? encodePolyline(points) : null;
-    // Keine Straße gefunden ist eine Antwort und bleibt gespeichert.
-    try { await redis.set(routeKey(id), enc || 'none'); } catch { /* egal */ }
+    const route = await routeFor(pass.lat, pass.lon);
+    const enc = route && route.points.length > 3 ? encodePolyline(route.points) : null;
+    if (!enc) {
+      // Keine Straße gefunden ist eine Antwort und bleibt gespeichert.
+      try { await redis.set(routeKey(id), 'none'); } catch { /* egal */ }
+      return { enc: null, settled: true };
+    }
+    try { await redis.set(routeKey(id), JSON.stringify({ enc, stats: route.stats })); } catch { /* egal */ }
+    // Die Kennzahlen an den Pass schreiben, damit die Liste sie ohne
+    // zusätzliche Abfrage anzeigen kann.
+    try { await patchPass(id, route.stats); } catch { /* dann eben ohne */ }
     return { enc, settled: true };
   } catch {
     // Zeitüberschreitung oder Overpass überlastet: in einer Stunde nochmal.

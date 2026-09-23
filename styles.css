@@ -161,3 +161,6 @@ a.cover{cursor:pointer}
 .map-title{flex:1;min-width:0;font:600 1.15rem var(--cond);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .map-fail{margin:0;padding:34px 20px;text-align:center;color:var(--muted)}
 #mapOpen{text-decoration:none;display:inline-block}
+
+/* Kennzahlen der Passstraße */
+.facts{margin:4px 2px 0;font:500 .95rem var(--cond);color:var(--muted);letter-spacing:.01em}
