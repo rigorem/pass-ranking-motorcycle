@@ -3,8 +3,8 @@
 // das Kartenbild gelegt wird. Pro Pass passiert das genau einmal.
 
 const ROAD = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)$';
-const RADIUS = 7000;      // Meter, in denen nach Straßen gesucht wird
-const REACH = 8000;       // Meter, die ab dem Pass je Richtung mitgenommen werden
+const RADIUS = 6000;      // Meter, in denen nach Straßen gesucht wird
+const REACH = 7000;       // Meter, die ab dem Pass je Richtung mitgenommen werden
 const MAX_POINTS = 380;
 
 function metersBetween(a, b) {
@@ -16,22 +16,39 @@ function metersBetween(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// Overpass ist ein freier Dienst und zeitweise überlastet. Deshalb zwei
+// Server nacheinander, jeder mit knappem Zeitlimit – zusammen bleiben sie
+// unter der Laufzeit, die die Funktion hat.
+const MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
+
 async function askOverpass(lat, lon) {
-  const query = `[out:json][timeout:60];
+  const query = `[out:json][timeout:25];
 way(around:${RADIUS},${lat},${lon})["highway"~"${ROAD}"];
 out geom;`;
-  const r = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'pass-ranking-motorcycle/1.0 (https://pass-ranking-motorcycle.vercel.app)'
-    },
-    body: new URLSearchParams({ data: query }),
-    signal: AbortSignal.timeout(18000)
-  });
-  if (!r.ok) throw new Error('overpass ' + r.status);
-  const d = await r.json();
-  return (d.elements || []).filter(w => w.type === 'way' && w.geometry && w.geometry.length > 1);
+
+  let last = null;
+  for (const endpoint of MIRRORS) {
+    try {
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'pass-ranking-motorcycle/1.0 (https://pass-ranking-motorcycle.vercel.app)'
+        },
+        body: new URLSearchParams({ data: query }),
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!r.ok) { last = new Error('overpass ' + r.status); continue; }
+      const d = await r.json();
+      return (d.elements || []).filter(w => w.type === 'way' && w.geometry && w.geometry.length > 1);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last || new Error('overpass nicht erreichbar');
 }
 
 // Die Straße, auf der der Pass liegt: der Weg mit dem nächsten Punkt.
