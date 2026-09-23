@@ -24,16 +24,22 @@ function same(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-export function checkPassword(input) {
-  const pw = process.env.APP_PASSWORD;
-  if (!pw || typeof input !== 'string' || !input) return false;
-  return same(input, pw);
+// Zwei Passwörter, zwei Rollen: 'edit' darf alles, 'guest' darf zusehen.
+// Welche gilt, steht mitsigniert im Cookie – raten lässt sie sich nicht.
+export function roleFor(input) {
+  if (typeof input !== 'string' || !input) return null;
+  const full = process.env.APP_PASSWORD;
+  const guest = process.env.GUEST_PASSWORD;
+  if (full && same(input, full)) return 'edit';
+  if (guest && same(input, guest)) return 'guest';
+  return null;
 }
 
-export function sessionCookie() {
+export function sessionCookie(role) {
   const key = secret();
   const exp = Date.now() + MAX_AGE * 1000;
-  const token = `${exp}.${sign(String(exp), key)}`;
+  const payload = `${role}.${exp}`;
+  const token = `${payload}.${sign(payload, key)}`;
   return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${MAX_AGE}`;
 }
 
@@ -41,27 +47,50 @@ export function clearCookie() {
   return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
-export function isAuthed(req) {
+// Gibt die Rolle aus dem Cookie zurück, oder null.
+export function sessionRole(req) {
   const key = secret();
-  if (!key) return false;
+  if (!key) return null;
   const raw = req.headers.cookie || '';
   const hit = raw.split(';').map(s => s.trim()).find(s => s.startsWith(COOKIE + '='));
-  if (!hit) return false;
-  const [exp, sig] = decodeURIComponent(hit.slice(COOKIE.length + 1)).split('.');
-  if (!exp || !sig || !Number(exp) || Number(exp) < Date.now()) return false;
-  const want = sign(exp, key);
-  return want.length === sig.length && crypto.timingSafeEqual(Buffer.from(want), Buffer.from(sig));
+  if (!hit) return null;
+
+  const [role, exp, sig] = decodeURIComponent(hit.slice(COOKIE.length + 1)).split('.');
+  if (!role || !exp || !sig) return null;
+  if (role !== 'edit' && role !== 'guest') return null;
+  if (!Number(exp) || Number(exp) < Date.now()) return null;
+
+  const want = sign(`${role}.${exp}`, key);
+  if (want.length !== sig.length) return null;
+  return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(sig)) ? role : null;
 }
 
-// Wacht vor jeder Route, die Daten oder Fotos herausgibt. Gibt false zurück
-// und beantwortet die Anfrage bereits, wenn nicht eingeloggt.
+export function isAuthed(req) {
+  return sessionRole(req) !== null;
+}
+
+// Wacht vor jeder Route, die Daten oder Fotos herausgibt. Gibt die Rolle
+// zurück, oder false – dann ist die Anfrage schon beantwortet.
 export function guard(req, res) {
   if (!process.env.APP_PASSWORD) {
     res.status(500).json({ error: 'not_configured' });
     return false;
   }
-  if (!isAuthed(req)) {
+  const role = sessionRole(req);
+  if (!role) {
     res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  return role;
+}
+
+// Zusätzlich vor alles, was etwas verändert. Die Gastansicht blendet diese
+// Knöpfe zwar aus, aber verlassen kann man sich nur auf diese Prüfung hier.
+export function guardWrite(req, res) {
+  const role = guard(req, res);
+  if (!role) return false;
+  if (role !== 'edit') {
+    res.status(403).json({ error: 'read_only' });
     return false;
   }
   return true;

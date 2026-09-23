@@ -1,4 +1,4 @@
-import { guard } from '../_lib/auth.js';
+import { guard, guardWrite } from '../_lib/auth.js';
 import { redis, photoKey } from '../_lib/store.js';
 import { put } from '@vercel/blob';
 import crypto from 'node:crypto';
@@ -25,6 +25,7 @@ export default async function handler(req, res) {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'method_not_allowed' });
   }
+  if (!guardWrite(req, res)) return;
 
   const type = String(req.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
   if (!ALLOWED.has(type)) return res.status(415).json({ error: 'unsupported_type' });

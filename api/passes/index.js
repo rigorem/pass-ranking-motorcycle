@@ -1,4 +1,4 @@
-import { guard } from '../_lib/auth.js';
+import { guard, guardWrite } from '../_lib/auth.js';
 import { listPasses, putPass, makeId, nextOrder, getRev } from '../_lib/store.js';
 
 export default async function handler(req, res) {
@@ -15,6 +15,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    if (!guardWrite(req, res)) return;
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const de = String(body.de || '').trim();
     if (!de) return res.status(400).json({ error: 'name_required' });

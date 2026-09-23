@@ -45,13 +45,28 @@ sind Barlow und Barlow Condensed von Google Fonts.
   `photo:<id>` nur der Pfad im Store; ausgeliefert werden die Bilder von
   `/api/photos/<id>`, das sie mit dem Store-Token holt und durchreicht.
 
-## Passwortschutz
+## Passwortschutz und Gastansicht
 
-Ein gemeinsames Passwort in `APP_PASSWORD`, geprüft auf dem Server. Stimmt es,
-setzt `/api/auth` ein HMAC-signiertes Cookie (HttpOnly, Secure, SameSite=Lax,
-30 Tage). Jede Route unter `/api` prüft dieses Cookie, **auch das Ausliefern der
-Fotos** – ohne Anmeldung gibt `/api/photos/<id>` eine 401 zurück. Nach zehn
-Fehlversuchen ist eine IP 15 Minuten gesperrt.
+Zwei Passwörter, zwei Rollen:
+
+| Variable | Rolle | darf |
+| --- | --- | --- |
+| `APP_PASSWORD` | `edit` | alles: bewerten, Notizen, Fotos, Pässe anlegen und löschen |
+| `GUEST_PASSWORD` | `guest` | alles ansehen, nichts ändern |
+
+Beide laufen über dasselbe Eingabefeld; welches Passwort kam, entscheidet der
+Server. Stimmt es, setzt `/api/auth` ein Cookie (HttpOnly, Secure,
+SameSite=Lax, 30 Tage), in dem die Rolle **mitsigniert** ist – aus `guest.…`
+ein `edit.…` zu machen, macht die Signatur ungültig.
+
+Jede Route unter `/api` prüft das Cookie, **auch das Ausliefern der Fotos** –
+ohne Anmeldung gibt `/api/photos/<id>` eine 401 zurück. Alles, was etwas
+verändert, prüft zusätzlich die Rolle und antwortet Gästen mit 403. Die
+Gastansicht blendet Bewertungsbalken, Notizfelder, Fotoupload und die
+Bearbeiten-Knöpfe aus, aber verlassen kann man sich allein auf `guardWrite`
+in `api/_lib/auth.js`. Nach zehn Fehlversuchen ist eine IP 15 Minuten gesperrt.
+
+Bleibt `GUEST_PASSWORD` leer, gibt es schlicht keine Gastansicht.
 
 Die Passwortabfrage im Browser ist nur die Tür, nicht das Schloss: das Schloss
 sitzt in `api/_lib/auth.js`. Wer die Seite ohne Anmeldung aufruft, bekommt vom
@@ -73,7 +88,8 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
    - **Blob** → setzt `BLOB_READ_WRITE_TOKEN`. Der Store muss auf **private**
      stehen; die App lädt Fotos ausdrücklich mit `access: 'private'` hoch.
 3. Unter **Settings → Environment Variables** setzen:
-   - `APP_PASSWORD` – das gemeinsame Passwort
+   - `APP_PASSWORD` – das Passwort zum Bearbeiten
+   - `GUEST_PASSWORD` – das Passwort für die Gastansicht (nur lesen)
    - `MAPTILER_KEY` – für die Kartenbilder, kostenloser Schlüssel von
      [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln
      leer. Das freie Kontingent genügt: gebraucht werden nur Rasterkacheln,

@@ -1,4 +1,4 @@
-import { guard } from '../_lib/auth.js';
+import { guard, guardWrite } from '../_lib/auth.js';
 import { patchPass, deletePass, redis, photoKey } from '../_lib/store.js';
 import { del as deleteBlob } from '@vercel/blob';
 
@@ -25,6 +25,7 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id_required' });
 
   if (req.method === 'PATCH' || req.method === 'PUT') {
+    if (!guardWrite(req, res)) return;
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const patch = {};
     for (const [k, v] of Object.entries(body)) {
@@ -46,6 +47,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
+    if (!guardWrite(req, res)) return;
     try {
       const pass = await deletePass(id);
       if (!pass) return res.status(404).json({ error: 'not_found' });

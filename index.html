@@ -16,7 +16,7 @@
 <div class="wrap">
   <header>
     <h1>Pässe&shy;ranking</h1>
-    <p>Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.</p>
+    <p id="intro">Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.</p>
   </header>
   <div class="bar">
     <div class="seg-ctl" role="group" aria-label="Sortieren nach">
@@ -26,6 +26,7 @@
     </div>
     <span class="count" id="count"></span>
   </div>
+  <p class="guest-hint" id="guestHint" hidden>Gastansicht: Bewertungen, Notizen und Fotos sind hier nur zum Anschauen.</p>
   <ol class="list" id="list"><li class="notice">Lade Pässe …</li></ol>
   <button class="add-pass" id="addPass" hidden>+ Pass hinzufügen</button>
   <div class="page-foot">
@@ -36,7 +37,7 @@
 <dialog id="loginDlg" class="gate">
   <form class="form" id="loginForm" method="dialog">
     <h3>Passwort</h3>
-    <p class="hint">Diese Seite und die Fotos darauf sind privat. Bitte das gemeinsame Passwort eingeben.</p>
+    <p class="hint">Diese Seite und die Fotos darauf sind privat. Bitte das Passwort eingeben – mit dem Gastpasswort sieht man alles, ändern lässt sich nichts.</p>
     <label>Passwort<input name="password" type="password" autocomplete="current-password" required></label>
     <p class="err" id="loginErr" hidden></p>
     <div class="row">

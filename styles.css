@@ -164,3 +164,13 @@ a.cover{cursor:pointer}
 
 /* Kennzahlen der Passstraße */
 .facts{margin:4px 2px 0;font:500 .95rem var(--cond);color:var(--muted);letter-spacing:.01em}
+
+/* Gastansicht: nur lesen */
+.guest-hint{
+  margin:0 0 16px;padding:.55rem .8rem;border-radius:10px;
+  background:var(--surface);border:1px solid var(--line);
+  color:var(--muted);font-size:.92rem;
+}
+body.guest .dots button{cursor:default}
+body.guest .dots button:hover{filter:none}
+body.guest .note{border-style:dashed;opacity:.85}

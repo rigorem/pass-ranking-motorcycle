@@ -1,4 +1,4 @@
-import { checkPassword, sessionCookie, clearCookie } from './_lib/auth.js';
+import { roleFor, sessionCookie, clearCookie } from './_lib/auth.js';
 import { redis } from './_lib/store.js';
 
 const MAX_TRIES = 10;
@@ -54,14 +54,15 @@ export default async function handler(req, res) {
   }
 
   const body = typeof req.body === 'string' ? safeJson(req.body) : (req.body || {});
-  if (!checkPassword(body.password)) {
+  const role = roleFor(body.password);
+  if (!role) {
     await noteFailure(ip);
     return res.status(401).json({ error: 'wrong_password' });
   }
 
   await clearFailures(ip);
-  res.setHeader('Set-Cookie', sessionCookie());
-  res.status(200).json({ authed: true });
+  res.setHeader('Set-Cookie', sessionCookie(role));
+  res.status(200).json({ authed: true, role });
 }
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return {}; } }

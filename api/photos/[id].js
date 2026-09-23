@@ -1,4 +1,4 @@
-import { guard } from '../_lib/auth.js';
+import { guard, guardWrite } from '../_lib/auth.js';
 import { redis, photoKey } from '../_lib/store.js';
 import { get as getBlob, del as deleteBlob } from '@vercel/blob';
 
@@ -38,6 +38,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'DELETE') {
     res.setHeader('Cache-Control', 'no-store');
+    if (!guardWrite(req, res)) return;
     try {
       await deleteBlob(String(path));
       await redis.del(photoKey(id));

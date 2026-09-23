@@ -16,6 +16,7 @@ let uploadFor = null;
 let editId = null;
 let lb = null;
 let authed = false;
+let canWrite = true;    // Gastansicht: alles sichtbar, nichts veränderbar
 let rev = 0;            // Änderungszähler des Servers, zuletzt gesehen
 let inflight = 0;       // eigene Schreibvorgänge unterwegs
 const queues = {};
@@ -115,8 +116,10 @@ $('#loginForm').addEventListener('submit', async e => {
   btn.disabled = true;
   btn.textContent = 'Prüfe …';
   try {
-    await api.login(pw);
+    const d = await api.login(pw);
     authed = true;
+    canWrite = d.role !== 'guest';
+    applyRole();
     input.value = '';
     $('#loginErr').hidden = true;
     $('#loginDlg').close();
@@ -200,11 +203,11 @@ function render(changed = EMPTY) {
           ${rateRow(p, 'fun', 'Fahrspaß')}
           ${rateRow(p, 'amb', 'Ambiente')}
         </div>
-        <div class="photos">${photos}<button class="add-photo" data-upload="${esc(p.id)}">+ Fotos</button></div>
-        <textarea class="note" data-note="${esc(p.id)}" rows="2" placeholder="Notiz: Straßenzustand, Verkehr, Einkehr …">${esc(p.note)}</textarea>
+        ${photos || canWrite ? `<div class="photos">${photos}${canWrite ? `<button class="add-photo" data-upload="${esc(p.id)}">+ Fotos</button>` : ''}</div>` : ''}
+        ${canWrite || p.note ? `<textarea class="note" data-note="${esc(p.id)}" rows="2" placeholder="Notiz: Straßenzustand, Verkehr, Einkehr …"${canWrite ? '' : ' readonly'}>${esc(p.note)}</textarea>` : ''}
         <div class="foot">
           ${hasPlace(p) ? `<a class="link" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener" data-map="${esc(p.id)}">Strecke ansehen</a>` : ''}
-          <button class="link" data-edit="${esc(p.id)}">Namen und Daten bearbeiten</button>
+          ${canWrite ? `<button class="link" data-edit="${esc(p.id)}">Namen und Daten bearbeiten</button>` : ''}
         </div>
       </div>
     </li>`;
@@ -215,7 +218,7 @@ function rateRow(p, key, label) {
   const v = p[key];
   let dots = '';
   for (let n = 1; n <= 10; n++) {
-    dots += `<button data-rate="${key}" data-n="${n}" data-pass="${esc(p.id)}" class="${v != null && n <= v ? 'on' : ''}" aria-label="${label} ${n} von 10"></button>`;
+    dots += `<button data-rate="${key}" data-n="${n}" data-pass="${esc(p.id)}" class="${v != null && n <= v ? 'on' : ''}" aria-label="${label} ${n} von 10"${canWrite ? '' : ' disabled'}></button>`;
   }
   return `<div class="rate ${key}"><label>${label}</label><div class="dots">${dots}</div><span class="val${v == null ? ' none' : ''}">${v == null ? '–' : v}</span></div>`;
 }
@@ -267,6 +270,7 @@ function facts(p) {
 // Optimistisch anzeigen, im Hintergrund speichern, bei Fehler zurückdrehen.
 // Pro Pass eine Kette, damit schnelle Klicks in der richtigen Reihenfolge ankommen.
 function write(id, patch) {
+  if (!canWrite) return;
   const p = passes.find(x => x.id === id);
   if (!p) return;
   const before = {};
@@ -357,7 +361,7 @@ list.addEventListener('click', e => {
     const img = t.tagName === 'IMG' ? t : t.querySelector('img');
     $('#lbImg').src = img ? img.src : '/api/photos/' + encodeURIComponent(t.dataset.photo);
     $('#lbImg').alt = img ? img.alt : '';
-    $('#lbDel').hidden = false;
+    $('#lbDel').hidden = !canWrite;
     $('#lightbox').showModal();
   }
 });
@@ -693,6 +697,8 @@ $('#delPass').onclick = async () => {
 $('#logout').onclick = async () => {
   try { await api.logout(); } catch { /* egal, Cookie ist ohnehin gleich weg */ }
   passes = [];
+  canWrite = true;
+  applyRole();
   render();
   await openGate();
   await load();
@@ -753,16 +759,28 @@ document.addEventListener('visibilitychange', () => {
 });
 list.addEventListener('pointerdown', touch);
 
+// Blendet aus, was ein Gast nicht benutzen darf. Der eigentliche Schutz sitzt
+// im Server, das hier ist nur die Oberfläche dazu.
+function applyRole() {
+  document.body.classList.toggle('guest', !canWrite);
+  $('#addPass').hidden = !canWrite;
+  $('#guestHint').hidden = canWrite;
+  $('#intro').textContent = canWrite
+    ? 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
+    : 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente.';
+}
+
 (async () => {
   let s;
   try { s = await api.session(); } catch { s = { authed: false }; }
   authed = !!s.authed;
+  canWrite = s.role !== 'guest';
   if (!authed) {
     await openGate(s.configured === false ? 'Auf dem Server fehlt APP_PASSWORD.' : '');
   } else {
     document.body.classList.remove('locked');
   }
-  $('#addPass').hidden = false;
+  applyRole();
   $('#logout').hidden = false;
   await load();
   schedule();
