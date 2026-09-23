@@ -110,20 +110,31 @@ export default async function handler(req, res) {
     ? [['route', withRoute(enc, W, H)], ['centred', centred(lat, lon, W, H)]]
     : [['centred', centred(lat, lon, W, H)]];
 
+  // MapTiler-Schlüssel lassen sich auf bestimmte Herkünfte beschränken. Ein
+  // Aufruf vom Server schickt von sich aus keinen Referer und fliegt dann mit
+  // 403 raus – also die eigene Adresse mitgeben.
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  const origin = host ? `https://${host}` : '';
+  const headers = origin ? { Referer: origin + '/', Origin: origin } : {};
+
   let data = null, used = null;
   const tried = [];
   for (const [label, url] of attempts) {
     try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
       if (r.ok) { data = Buffer.from(await r.arrayBuffer()); used = label; break; }
       // Sagen, woran es lag – sonst rät man beim nächsten Fehler wieder.
-      const why = (await r.text().catch(() => '')).slice(0, 200);
+      // Bei Ablehnung kommt oft ein Fehlerbild zurück, kein Text.
+      const type = r.headers.get('content-type') || '';
+      const why = type.includes('image')
+        ? '(Fehlerbild statt Text)'
+        : (await r.text().catch(() => '')).slice(0, 200);
       tried.push({ attempt: label, status: r.status, message: why });
     } catch (e) {
       tried.push({ attempt: label, error: String(e.name || e.message || e) });
     }
   }
-  if (!data) return fail(502, { error: 'map_unavailable', tried, style: STYLE });
+  if (!data) return fail(502, { error: 'map_unavailable', tried, style: STYLE, sentReferer: origin || null });
 
   // Nur behalten, wenn das Bild den endgültigen Stand zeigt. Ein Notbehelf
   // ohne Straßenverlauf würde sonst für immer hängenbleiben.
