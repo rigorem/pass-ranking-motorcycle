@@ -1,6 +1,7 @@
 import { guard } from '../_lib/auth.js';
 import { getPass, patchPass, redis } from '../_lib/store.js';
-import { routeFor, encodePolyline } from '../_lib/route.js';
+import { routeFor, encodePolyline, decodePolyline } from '../_lib/route.js';
+import { renderMap } from '../_lib/tilemap.js';
 import { put, get as getBlob } from '@vercel/blob';
 
 // Das Kartenbild eines Passes: die Passstraße mit ihren Kehren, aus
@@ -11,10 +12,12 @@ import { put, get as getBlob } from '@vercel/blob';
 // mit; kodiert landet der dann als %20 im Schlüssel und der Dienst lehnt ab.
 const KEY = () => (process.env.MAPTILER_KEY || '').trim();
 const STYLE = (process.env.MAPTILER_STYLE || 'streets-v4').trim();
-const STROKE = 'C94F83';
+const STROKE = '#C94F83';
 
+// Die Kachel in der Liste ist quadratisch – quadratisch rendern, sonst
+// schneidet der Ausschnitt die Strecke an den Seiten ab.
 const SIZES = {
-  thumb: [320, 240],
+  thumb: [280, 280],
   large: [720, 540]
 };
 
@@ -25,7 +28,7 @@ async function send(res, path) {
   const found = await getBlob(String(path), { access: 'private' });
   if (!found || found.statusCode !== 200) return false;
   const body = Buffer.from(await new Response(found.stream).arrayBuffer());
-  res.setHeader('Content-Type', found.blob.contentType || 'image/png');
+  res.setHeader('Content-Type', found.blob.contentType || 'image/svg+xml');
   res.setHeader('Content-Length', String(body.length));
   res.setHeader('Cache-Control', 'private, max-age=604800');
   res.status(200).end(body);
@@ -65,21 +68,13 @@ async function polylineFor(id, pass) {
   }
 }
 
-function withRoute(enc, w, h) {
-  // Die Polylinie darf roh nicht in die URL: ihr Alphabet enthält unter
-  // anderem "|" und "\\", also genau die Zeichen, an denen der Kartendienst
-  // die Pfadangabe zerlegt. Die Trenner bleiben literal, der Rest wird kodiert.
-  const path = `fill:none|stroke:%23${STROKE}|width:4|enc:${encodeURIComponent(enc)}`;
-  return `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/static/auto/${w}x${h}@2x.png`
-    + `?path=${path}&padding=0.12&key=${encodeURIComponent(KEY())}&attribution=bottomright`;
-}
-
-// Ohne Marker: die Markierungssyntax ist bei jedem Kartendienst anders, und
-// die eingezeichnete Straße ist ohnehin die Auskunft, um die es geht.
-function centred(lat, lon, w, h) {
-  return `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/static/${lon},${lat},11/${w}x${h}@2x.png`
-    + `?key=${encodeURIComponent(KEY())}&attribution=bottomright`;
-}
+// Kachel-URL. Die Static-Maps-API von MapTiler kostet extra, Kacheln sind im
+// freien Kontingent enthalten – deshalb wird das Bild selbst zusammengesetzt.
+// Ausdrücklich die 256er-Kacheln: ohne die Angabe kommen 512er zurück, die
+// hier ohnehin heruntergerechnet würden – bei viermal so vielen Bytes, und die
+// stecken als base64 im ausgelieferten Bild.
+const tileUrl = (z, x, y) =>
+  `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/256/${z}/${x}/${y}.png?key=${encodeURIComponent(KEY())}`;
 
 export default async function handler(req, res) {
   if (!guard(req, res)) return;
@@ -114,58 +109,35 @@ export default async function handler(req, res) {
     return fail(404, { error: 'no_coordinates' });
   }
 
-  const lat = pass.lat.toFixed(5), lon = pass.lon.toFixed(5);
   const { enc, settled } = await polylineFor(id, pass);
+  const points = enc ? decodePolyline(enc) : [];
 
-  // Erst mit Straßenverlauf versuchen, sonst schlicht auf den Pass zentriert.
-  const attempts = enc
-    ? [['route', withRoute(enc, W, H)], ['centred', centred(lat, lon, W, H)]]
-    : [['centred', centred(lat, lon, W, H)]];
-
-  // MapTiler-Schlüssel lassen sich auf bestimmte Herkünfte beschränken. Ein
-  // Aufruf vom Server schickt von sich aus keinen Referer und fliegt dann mit
-  // 403 raus – also die eigene Adresse mitgeben.
-  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-  const origin = host ? `https://${host}` : '';
-
-  // Beide Fälle abdecken: ist der Schlüssel auf diese Adresse beschränkt,
-  // braucht es den Referer – steht in der Liste etwas anderes, stört er.
-  const variants = origin
-    ? [['mit Referer', { Referer: origin + '/', Origin: origin }], ['ohne Referer', {}]]
-    : [['ohne Referer', {}]];
-
-  let data = null, used = null;
-  const tried = [];
-  outer:
-  for (const [label, url] of attempts) {
-   for (const [how, headers] of variants) {
-    try {
-      const r = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-      if (r.ok) { data = Buffer.from(await r.arrayBuffer()); used = `${label}/${how}`; break outer; }
-      // Sagen, woran es lag – sonst rät man beim nächsten Fehler wieder.
-      // Bei Ablehnung kommt oft ein Fehlerbild zurück, kein Text.
-      const type = r.headers.get('content-type') || '';
-      const why = type.includes('image')
-        ? '(Fehlerbild statt Text)'
-        : (await r.text().catch(() => '')).slice(0, 200);
-      tried.push({ attempt: `${label}/${how}`, status: r.status, message: why });
-    } catch (e) {
-      tried.push({ attempt: `${label}/${how}`, error: String(e.name || e.message || e) });
-    }
-   }
+  let svg;
+  try {
+    svg = await renderMap({
+      points,
+      centre: { lat: pass.lat, lon: pass.lon },
+      width: W, height: H,
+      tileUrl,
+      stroke: STROKE
+    });
+  } catch (e) {
+    return fail(502, {
+      error: 'map_unavailable',
+      reason: String(e.message || e),
+      style: STYLE,
+      keyLength: KEY().length          // nur die Länge, nie der Schlüssel selbst
+    });
   }
-  if (!data) return fail(502, {
-    error: 'map_unavailable', tried, style: STYLE,
-    sentReferer: origin || null,
-    keyLength: KEY().length          // nur die Länge, nie der Schlüssel selbst
-  });
+  const data = Buffer.from(svg, 'utf8');
+  const used = points.length ? 'route' : 'centred';
 
   // Nur behalten, wenn das Bild den endgültigen Stand zeigt. Ein Notbehelf
   // ohne Straßenverlauf würde sonst für immer hängenbleiben.
   if (settled && !(enc && !String(used).startsWith('route'))) {
     try {
-      const blob = await put(`maps/${id}-${size}.png`, data, {
-        access: 'private', addRandomSuffix: true, contentType: 'image/png', allowOverwrite: true
+      const blob = await put(`maps/${id}-${size}.svg`, data, {
+        access: 'private', addRandomSuffix: true, contentType: 'image/svg+xml', allowOverwrite: true
       });
       await redis.set(blobKey(id, size), blob.pathname);
     } catch { /* dann eben beim nächsten Mal wieder rendern */ }
@@ -173,7 +145,7 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
   }
 
-  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Content-Length', String(data.length));
   res.setHeader('X-Map-Kind', used);
   res.setHeader('Cache-Control', 'private, max-age=604800');

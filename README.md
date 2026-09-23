@@ -19,6 +19,7 @@ api/
   place.js             GET  – Koordinate -> Gegend (Nominatim, gecacht)
   map/[id].js          GET  – Kartenbild mit Streckenverlauf
   _lib/route.js        Straßenverlauf über den Pass aus OpenStreetMap
+  _lib/tilemap.js      Setzt Kacheln zusammen und zeichnet die Strecke darauf
   passes/index.js      GET  – alle Pässe, POST – neuer Pass
   passes/[id].js       PATCH – Felder ändern, DELETE – Pass samt Fotos
   photos/index.js      POST – Foto hochladen
@@ -74,15 +75,17 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
 3. Unter **Settings → Environment Variables** setzen:
    - `APP_PASSWORD` – das gemeinsame Passwort
    - `MAPTILER_KEY` – für die Kartenbilder, kostenloser Schlüssel von
-     [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln leer
+     [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln
+     leer. Das freie Kontingent genügt: gebraucht werden nur Rasterkacheln,
+     nicht die kostenpflichtige Static-Maps-API
    - optional `SESSION_SECRET` (`openssl rand -hex 32`)
    - optional `MAPTILER_STYLE`, voreingestellt `streets-v4`
 
    Der Schlüssel wird nur auf dem Server benutzt und erreicht den Browser nie.
    In den Schlüsseleinstellungen bei MapTiler bleiben die **Allowed HTTP
-   origins deshalb am besten leer**: eine Herkunftssperre schützt hier nichts
-   und lehnt Serveraufrufe ab. Wer sie trotzdem setzt, trägt die eigene
-   Adresse ein, die App schickt sie als Referer mit.
+   origins deshalb am besten leer**: eine Herkunftssperre schützt hier nichts.
+   Die App fragt jede Kachel einmal mit und einmal ohne Referer an, falls doch
+   eine gesetzt ist.
 4. Deployen.
 5. Pässe einspielen:
    ```sh
@@ -145,11 +148,21 @@ zählt eine zusammenhängende Richtungsänderung ab 35°, als Kehre eine ab 120�
 Die Zahlen erscheinen, sobald das Kartenbild einmal gebaut wurde, und stehen
 danach am Pass.
 
-Das Kartenbild kommt von MapTiler, der Straßenverlauf aus OpenStreetMap.
-Beides wird pro Pass genau einmal geholt und landet dann im privaten
-Blob-Store, ausgeliefert wie die Fotos über eine Route mit Passwortprüfung.
-Ein Pass kostet also einmalig zwei Bilder und eine Overpass-Abfrage, danach
-nichts mehr.
+Das Bild wird selbst gebaut: `api/_lib/tilemap.js` holt die Rasterkacheln von
+MapTiler, setzt sie nebeneinander, legt den Straßenverlauf darüber und gibt
+alles als SVG zurück, die Kacheln als Daten eingebettet. Die Static-Maps-API
+von MapTiler wäre der bequemere Weg, gehört dort aber zu den kostenpflichtigen
+Diensten – Kacheln sind im freien Kontingent enthalten. Nebenbei bleibt der
+Schlüssel so auf dem Server.
+
+Ausschnitt und Zoomstufe ergeben sich aus der Strecke: gewählt wird die
+größte Stufe, auf der die ganze Passstraße noch ins Bild passt. Kennt die App
+den Verlauf nicht, zeigt sie den Pass auf Stufe 12 mit Markierung.
+
+Straßenverlauf und fertiges Bild werden pro Pass einmal geholt und landen dann
+im privaten Blob-Store, ausgeliefert wie die Fotos über eine Route mit
+Passwortprüfung. Danach kostet ein Aufruf nichts mehr bei fremden Diensten.
+Die Kachel wiegt rund 80 KB, die große Ansicht rund 260 KB.
 
 `api/_lib/route.js` sucht die Straße, auf der der Pass liegt, und läuft von
 dort acht Kilometer in beide Richtungen weiter. An Kreuzungen wird die Straße

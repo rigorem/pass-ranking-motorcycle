@@ -186,6 +186,22 @@ export function encodePolyline(points) {
   return out;
 }
 
+// Gegenstück zu encodePolyline.
+export function decodePolyline(str) {
+  const out = [];
+  let i = 0, lat = 0, lon = 0;
+  while (i < str.length) {
+    let shift = 0, result = 0, b;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lon += (result & 1) ? ~(result >> 1) : (result >> 1);
+    out.push({ lat: lat / 1e5, lon: lon / 1e5 });
+  }
+  return out;
+}
+
 // Liefert die Passstraße samt Kennzahlen, vom einen Talende bis zum anderen.
 export async function routeFor(lat, lon) {
   return buildFromWays(await askOverpass(lat, lon), lat, lon);
