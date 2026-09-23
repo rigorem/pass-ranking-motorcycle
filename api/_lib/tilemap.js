@@ -89,8 +89,11 @@ export async function renderMap({ points, centre, width, height, tileUrl, stroke
   const tiles = loaded.filter(Boolean);
   if (!tiles.length) throw new Error('keine Kachel geladen');
 
+  // xlink:href statt href: ein als <img> eingebundenes SVG wird in einem
+  // eingeschränkten Modus gezeichnet, in dem nicht jeder Browser die neuere
+  // Schreibweise auflöst. Beide zu setzen würde die Daten verdoppeln.
   const images = tiles.map(t =>
-    `<image href="${t.href}" x="${(t.tx * TILE - originX).toFixed(2)}" y="${(t.ty * TILE - originY).toFixed(2)}" width="${TILE}" height="${TILE}"/>`
+    `<image xlink:href="${t.href}" x="${(t.tx * TILE - originX).toFixed(2)}" y="${(t.ty * TILE - originY).toFixed(2)}" width="${TILE}" height="${TILE}"/>`
   ).join('');
 
   let route = '';
@@ -111,7 +114,7 @@ export async function renderMap({ points, centre, width, height, tileUrl, stroke
   const credit = '© MapTiler © OpenStreetMap';
   const creditWidth = credit.length * 5.4 + 10;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
     + `<rect width="${width}" height="${height}" fill="#E4E9EE"/>`
     + images + route + marker
     + `<g><rect x="${width - creditWidth - 3}" y="${height - 16}" width="${creditWidth}" height="13" rx="3" fill="#FFFFFF" fill-opacity=".72"/>`
