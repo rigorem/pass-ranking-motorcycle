@@ -182,10 +182,13 @@ function render(changed = EMPTY) {
     return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}">
       <div class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</div>
       <div>
-        <div class="plate"><div class="plate-in">
-          <h2>${esc(p.de)}</h2>${p.alt ? `<span class="alt">${esc(p.alt)} m</span>` : '<span></span>'}
-          ${intl ? `<div class="intl">${intl}</div>` : ''}
-        </div></div>
+        <div class="head">
+          ${cover(p)}
+          <div class="plate"><div class="plate-in">
+            <h2>${esc(p.de)}</h2>${p.alt ? `<span class="alt">${esc(p.alt)} m</span>` : '<span></span>'}
+            ${intl ? `<div class="intl">${intl}</div>` : ''}
+          </div></div>
+        </div>
         ${p.region ? `<p class="region">${esc(p.region)}</p>` : ''}
         <div class="ratings">
           ${rateRow(p, 'fun', 'Fahrspaß')}
@@ -193,7 +196,10 @@ function render(changed = EMPTY) {
         </div>
         <div class="photos">${photos}<button class="add-photo" data-upload="${esc(p.id)}">+ Fotos</button></div>
         <textarea class="note" data-note="${esc(p.id)}" rows="2" placeholder="Notiz: Straßenzustand, Verkehr, Einkehr …">${esc(p.note)}</textarea>
-        <div class="foot"><button class="link" data-edit="${esc(p.id)}">Namen und Daten bearbeiten</button></div>
+        <div class="foot">
+          ${hasPlace(p) ? `<a class="link" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener" data-map="${esc(p.id)}">Strecke ansehen</a>` : ''}
+          <button class="link" data-edit="${esc(p.id)}">Namen und Daten bearbeiten</button>
+        </div>
       </div>
     </li>`;
   }).join('');
@@ -206,6 +212,39 @@ function rateRow(p, key, label) {
     dots += `<button data-rate="${key}" data-n="${n}" data-pass="${esc(p.id)}" class="${v != null && n <= v ? 'on' : ''}" aria-label="${label} ${n} von 10"></button>`;
   }
   return `<div class="rate ${key}"><label>${label}</label><div class="dots">${dots}</div><span class="val${v == null ? ' none' : ''}">${v == null ? '–' : v}</span></div>`;
+}
+
+/* ------------------------------------------------------------- Karte --- */
+
+// Universeller Kartenlink: öffnet auf dem Handy die Karten-App, am Rechner
+// den Browser.
+function mapsUrl(p) {
+  return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+}
+
+function hasPlace(p) {
+  return typeof p.lat === 'number' && typeof p.lon === 'number';
+}
+
+// Die Kachel neben dem Schild: das erste eigene Foto, sonst das Kartenbild.
+// Passe ohne beides bekommen einen ruhigen Platzhalter, damit die Karten in
+// der Liste nicht unterschiedlich hoch werden.
+function cover(p) {
+  const photo = (p.photos || [])[0];
+  if (photo) {
+    return `<button class="cover" aria-label="Foto vom ${esc(p.de)} ansehen">
+      <img src="/api/photos/${encodeURIComponent(photo)}" alt="Foto vom ${esc(p.de)}" loading="lazy"
+           data-photo="${esc(photo)}" data-pass="${esc(p.id)}"></button>`;
+  }
+  if (hasPlace(p)) {
+    return `<a class="cover" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener"
+      data-map="${esc(p.id)}" aria-label="Strecke über den ${esc(p.de)} ansehen">
+      <img src="/api/map/${encodeURIComponent(p.id)}" alt="" loading="lazy" data-map="${esc(p.id)}"
+           onerror="this.closest('.cover').classList.add('blank')">
+      <svg class="cover-pin" viewBox="0 0 24 24" aria-hidden="true"><path
+        d="M12 2c-3.9 0-7 3.1-7 7 0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></a>`;
+  }
+  return '<span class="cover blank" aria-hidden="true"></span>';
 }
 
 /* --------------------------------------------------------- Schreiben --- */
@@ -279,8 +318,16 @@ document.querySelectorAll('.seg-ctl button').forEach(b => b.addEventListener('cl
 }));
 
 list.addEventListener('click', e => {
-  const t = e.target.closest('button,img');
+  const t = e.target.closest('button,img,a[data-map]');
   if (!t) return;
+  if (t.dataset.map) {
+    // Nicht wegnavigieren: erst die Strecke zeigen, der Weg nach draußen
+    // steht im Dialog.
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    openMap(passes.find(x => x.id === t.dataset.map));
+    return;
+  }
   if (t.dataset.rate) {
     const p = passes.find(x => x.id === t.dataset.pass);
     const n = +t.dataset.n;
@@ -292,8 +339,9 @@ list.addEventListener('click', e => {
     openEdit(t.dataset.edit);
   } else if (t.dataset.photo) {
     lb = { pass: t.dataset.pass, id: t.dataset.photo };
-    $('#lbImg').src = t.src;
-    $('#lbImg').alt = t.alt;
+    const img = t.tagName === 'IMG' ? t : t.querySelector('img');
+    $('#lbImg').src = img ? img.src : '/api/photos/' + encodeURIComponent(t.dataset.photo);
+    $('#lbImg').alt = img ? img.alt : '';
     $('#lbDel').hidden = false;
     $('#lightbox').showModal();
   }
@@ -378,6 +426,8 @@ let catalog = null;
 let catalogLoading = null;
 let picks = [];
 let cursor = -1;
+let pickedPlace = null;   // Koordinaten des zuletzt übernommenen Vorschlags
+let lastPickedName = '';
 
 function loadCatalog() {
   if (catalog) return Promise.resolve(catalog);
@@ -477,6 +527,8 @@ function moveCursor(step) {
 // wird einmal nachgeschlagen und serverseitig gemerkt.
 async function applyPick(p) {
   const f = $('#editForm');
+  pickedPlace = (typeof p.lat === 'number' && typeof p.lon === 'number') ? { lat: p.lat, lon: p.lon } : null;
+  lastPickedName = p.n;
   f.de.value = p.n;
   f.intl.value = p.it || '';
   f.lad.value = p.lld || '';
@@ -523,12 +575,33 @@ $('#suggest').addEventListener('pointerdown', e => {
 
 $('#editForm').de.addEventListener('blur', () => setTimeout(hideSuggestions, 120));
 
+// Zeigt die Passstraße mit ihren Kehren. Das Bild kommt von /api/map und
+// wird dort einmal gebaut; hier ist nur der Rahmen drumherum.
+function openMap(p) {
+  if (!p || !hasPlace(p)) return;
+  const img = $('#mapImg');
+  const fail = $('#mapFail');
+  fail.hidden = true;
+  img.hidden = false;
+  img.alt = 'Straßenverlauf über den ' + p.de;
+  img.onerror = () => { img.hidden = true; fail.hidden = false; };
+  img.src = `/api/map/${encodeURIComponent(p.id)}?size=large`;
+  $('#mapTitle').textContent = p.alt ? `${p.de} · ${p.alt} m` : p.de;
+  $('#mapOpen').href = mapsUrl(p);
+  $('#mapDlg').showModal();
+}
+
+$('#mapClose').onclick = () => $('#mapDlg').close();
+$('#mapDlg').addEventListener('click', e => { if (e.target.id === 'mapDlg') $('#mapDlg').close(); });
+
 /* ------------------------------------------------------- Pass-Dialog --- */
 
 function openEdit(id) {
   editId = id;
   const f = $('#editForm');
   f.reset();
+  pickedPlace = null;
+  lastPickedName = '';
   hideSuggestions();
   const note = $('#regionNote');
   if (note) note.hidden = true;
@@ -559,6 +632,12 @@ $('#editForm').addEventListener('submit', async e => {
     alt: f.alt.value ? +f.alt.value : null,
     region: f.region.value.trim()
   };
+  // Nur übernehmen, wenn der Name noch der aus dem Vorschlag ist – sonst
+  // hinge an einem handgetippten Pass die Koordinate eines anderen.
+  if (pickedPlace && data.de === lastPickedName) {
+    data.lat = pickedPlace.lat;
+    data.lon = pickedPlace.lon;
+  }
   if (!data.de) return;
   $('#editDlg').close();
 

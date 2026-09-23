@@ -77,6 +77,16 @@
   </div>
 </dialog>
 
+<dialog id="mapDlg">
+  <img id="mapImg" alt="">
+  <p class="map-fail" id="mapFail" hidden>Für diesen Pass gibt es noch kein Kartenbild.</p>
+  <div class="row">
+    <span class="map-title" id="mapTitle"></span>
+    <a class="btn ghost" id="mapOpen" target="_blank" rel="noopener">In Karten öffnen</a>
+    <button class="btn ghost" id="mapClose">Schließen</button>
+  </div>
+</dialog>
+
 <input type="file" id="fileIn" accept="image/*" multiple hidden>
 <div class="toast" id="toast" role="status"></div>
 <script src="/app.js" type="module"></script>

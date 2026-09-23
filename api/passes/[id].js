@@ -2,7 +2,19 @@ import { guard } from '../_lib/auth.js';
 import { patchPass, deletePass, redis, photoKey } from '../_lib/store.js';
 import { del as deleteBlob } from '@vercel/blob';
 
-const NUM = new Set(['fun', 'amb', 'alt']);
+const NUM = new Set(['fun', 'amb', 'alt', 'lat', 'lon']);
+
+// Das gerenderte Kartenbild wegräumen. Es baut sich beim nächsten Abruf neu auf.
+async function dropMap(id) {
+  try {
+    for (const key of [`map:${id}:thumb`, `map:${id}:large`]) {
+      const path = await redis.get(key);
+      if (path) await deleteBlob(String(path));
+      await redis.del(key);
+    }
+    await redis.del('route:' + id);
+  } catch { /* ein übrig gebliebenes Kartenbild ist kein Drama */ }
+}
 const TEXT = new Set(['de', 'intl', 'lad', 'region', 'note']);
 
 export default async function handler(req, res) {
@@ -22,6 +34,8 @@ export default async function handler(req, res) {
       else if (k === 'order') patch[k] = Number(v) || 0;
     }
     if ('de' in patch && !patch.de) return res.status(400).json({ error: 'name_required' });
+    // Anderer Ort, anderes Kartenbild – das alte muss weg.
+    if ('lat' in patch || 'lon' in patch) await dropMap(id);
     try {
       const pass = await patchPass(id, patch);
       if (!pass) return res.status(404).json({ error: 'not_found' });
@@ -35,6 +49,7 @@ export default async function handler(req, res) {
     try {
       const pass = await deletePass(id);
       if (!pass) return res.status(404).json({ error: 'not_found' });
+      await dropMap(id);
       // Die Fotos des Passes mit aufräumen, sonst bleiben sie für immer im Blob-Store.
       for (const photoId of pass.photos || []) {
         try {

@@ -17,6 +17,8 @@ api/
   auth.js              POST – anmelden, DELETE – abmelden
   version.js           GET  – Änderungszähler für den Live-Abgleich
   place.js             GET  – Koordinate -> Gegend (Nominatim, gecacht)
+  map/[id].js          GET  – Kartenbild mit Streckenverlauf
+  _lib/route.js        Straßenverlauf über den Pass aus OpenStreetMap
   passes/index.js      GET  – alle Pässe, POST – neuer Pass
   passes/[id].js       PATCH – Felder ändern, DELETE – Pass samt Fotos
   photos/index.js      POST – Foto hochladen
@@ -27,6 +29,7 @@ data/seed-passes.json  Die sieben Pässe für den ersten Start
 data/passes-alps.json  1811 Alpenpässe für die Namensvorschläge
 scripts/seed.mjs       Spielt die sieben Pässe in Redis ein
 scripts/build-passes.mjs  Baut den Pässe-Katalog aus OpenStreetMap
+scripts/backfill-coords.mjs  Trägt Koordinaten bei alten Pässen nach
 ```
 
 Kein Build-Schritt, kein Framework. Die einzige externe Ressource im Browser
@@ -68,8 +71,12 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
    - **Upstash Redis** → setzt `UPSTASH_REDIS_REST_URL` und `UPSTASH_REDIS_REST_TOKEN`
    - **Blob** → setzt `BLOB_READ_WRITE_TOKEN`. Der Store muss auf **private**
      stehen; die App lädt Fotos ausdrücklich mit `access: 'private'` hoch.
-3. Unter **Settings → Environment Variables** `APP_PASSWORD` setzen.
-   Optional `SESSION_SECRET` (`openssl rand -hex 32`).
+3. Unter **Settings → Environment Variables** setzen:
+   - `APP_PASSWORD` – das gemeinsame Passwort
+   - `MAPTILER_KEY` – für die Kartenbilder, kostenloser Schlüssel von
+     [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln leer
+   - optional `SESSION_SECRET` (`openssl rand -hex 32`)
+   - optional `MAPTILER_STYLE`, voreingestellt `outdoor-v2`
 4. Deployen.
 5. Pässe einspielen:
    ```sh
@@ -116,6 +123,38 @@ nicht, bleibt das Feld leer.
 Die ladinischen Namen stammen aus OSM und folgen nicht immer derselben
 Mundart wie eure eigenen Einträge (OSM schreibt „Ju de Frara“, ihr
 „Jëuf de Frea“) – beides ist richtig, das Feld bleibt ja änderbar.
+
+## Karte und Streckenverlauf
+
+Jede Passkarte hat links neben dem Schild eine Kachel. Darin steht das erste
+eigene Foto, und solange es keines gibt, ein Kartenbild des Passes. Ein Tipp
+darauf öffnet die Streckenansicht: dieselbe Karte größer, mit der Passstraße
+und ihren Kehren, dazu ein Knopf, der den Pass in der Karten-App öffnet.
+
+Das Kartenbild kommt von MapTiler, der Straßenverlauf aus OpenStreetMap.
+Beides wird pro Pass genau einmal geholt und landet dann im privaten
+Blob-Store, ausgeliefert wie die Fotos über eine Route mit Passwortprüfung.
+Ein Pass kostet also einmalig zwei Bilder und eine Overpass-Abfrage, danach
+nichts mehr.
+
+`api/_lib/route.js` sucht die Straße, auf der der Pass liegt, und läuft von
+dort acht Kilometer in beide Richtungen weiter. An Kreuzungen wird die Straße
+mit derselben Nummer bevorzugt, damit die Linie nicht in ein Seitental
+abbiegt. Anschließend wird die Linie vereinfacht – in Metern gerechnet, nicht
+in Grad, sonst fielen genau die engen Kehren weg.
+
+Damit die Kacheln erscheinen, braucht es `MAPTILER_KEY` in den Environment
+Variables. Fehlt der Schlüssel, bleibt die Kachel leer und alles andere
+funktioniert weiter. Antwortet Overpass gerade nicht, zeigt die Karte den Pass
+ohne eingezeichnete Straße, und das Bild wird nicht gespeichert – beim
+nächsten Aufruf wird es erneut versucht.
+
+Pässe, die vor dieser Änderung angelegt wurden, haben noch keine Koordinaten:
+
+```sh
+node --env-file=.env.local scripts/backfill-coords.mjs          # zeigt an
+node --env-file=.env.local scripts/backfill-coords.mjs --write  # schreibt
+```
 
 ## Gemeinsam bewerten
 

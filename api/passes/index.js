@@ -26,6 +26,8 @@ export default async function handler(req, res) {
         lad: String(body.lad || '').trim(),
         alt: body.alt === null || body.alt === undefined || body.alt === '' ? null : Number(body.alt),
         region: String(body.region || '').trim(),
+        lat: Number.isFinite(Number(body.lat)) ? Number(body.lat) : null,
+        lon: Number.isFinite(Number(body.lon)) ? Number(body.lon) : null,
         fun: null, amb: null, note: '', photos: [],
         order: await nextOrder()
       });
