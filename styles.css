@@ -105,3 +105,28 @@ dialog.gate::backdrop{background:rgba(10,16,22,.82);backdrop-filter:blur(6px)}
   .plate h2{font-size:1.5rem}
 }
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+
+/* Kurz aufleuchten, wenn der andere gerade etwas bewertet hat. */
+.pass.fresh{animation:fresh 1.6s ease-out}
+@keyframes fresh{
+  0%{box-shadow:0 0 0 2px var(--amb)}
+  100%{box-shadow:0 0 0 2px transparent}
+}
+@media (prefers-reduced-motion:reduce){.pass.fresh{animation:none}}
+
+/* Vorschlagsliste beim Anlegen eines Passes */
+#deField{position:relative}
+#suggest{
+  position:absolute;top:100%;left:0;right:0;z-index:5;margin:4px 0 0;padding:4px;
+  list-style:none;max-height:min(46vh,280px);overflow-y:auto;
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 12px 28px rgba(10,16,22,.22);
+}
+#suggest li{padding:.45rem .6rem;border-radius:7px;cursor:pointer;display:flex;gap:10px;align-items:baseline}
+#suggest li[aria-selected="true"]{background:var(--seg)}
+#suggest .s-name{font:600 1.1rem var(--cond);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#suggest .s-alt{font:600 1rem var(--cond);color:var(--muted);white-space:nowrap}
+#suggest .s-sub{display:block;font:400 .82rem var(--body);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#suggest mark{background:none;color:inherit;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:2px}
+#suggest .s-empty{color:var(--muted);font-size:.9rem;cursor:default;display:block}
+.form label .filled{color:var(--muted);font-weight:500;font-size:.8rem}

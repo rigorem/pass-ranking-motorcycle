@@ -49,11 +49,16 @@
 <dialog id="editDlg">
   <form class="form" id="editForm" method="dialog">
     <h3 id="editTitle">Pass hinzufügen</h3>
-    <label>Name deutsch<input name="de" required placeholder="z. B. Falzaregopass"></label>
+    <label id="deField">Name deutsch
+      <input name="de" required placeholder="z. B. Falzarego" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+      <ul id="suggest" role="listbox" aria-label="Passvorschläge" hidden></ul>
+    </label>
     <label>Internationaler / italienischer Name<input name="intl" placeholder="z. B. Passo di Falzarego"></label>
     <label>Ladinischer Name (optional)<input name="lad" placeholder="z. B. Ju de Falzares"></label>
     <label>Höhe in Metern<input name="alt" type="number" inputmode="numeric" min="0" max="5000"></label>
-    <label>Strecke / Region<input name="region" placeholder="z. B. Cortina – Arabba"></label>
+    <label>Strecke / Region <span class="filled" id="regionNote" hidden></span>
+      <input name="region" placeholder="z. B. Cortina – Arabba"></label>
     <div class="row">
       <button type="button" class="btn danger" id="delPass" hidden>Pass löschen</button>
       <span style="flex:1"></span>

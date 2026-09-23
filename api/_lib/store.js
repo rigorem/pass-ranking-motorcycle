@@ -7,6 +7,7 @@ const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TO
 export const redis = new Redis({ url, token });
 
 const IDS = 'passes:ids';
+const REV = 'passes:rev';
 const key = id => 'pass:' + id;
 const FIELDS = ['de', 'intl', 'lad', 'alt', 'region', 'fun', 'amb', 'note', 'photos', 'order'];
 
@@ -45,6 +46,17 @@ function encode(patch) {
   return out;
 }
 
+// Ein Zähler, der bei jeder Änderung hochgeht. Die Clients fragen nur ihn ab
+// und holen die Liste erst, wenn er sich bewegt hat.
+export async function getRev() {
+  const v = await redis.get(REV);
+  return Number(v || 0);
+}
+
+async function bumpRev() {
+  try { return Number(await redis.incr(REV)); } catch { return null; }
+}
+
 export async function listPasses() {
   const ids = await redis.smembers(IDS);
   if (!ids.length) return [];
@@ -59,6 +71,7 @@ export async function getPass(id) {
 export async function putPass(id, pass) {
   await redis.hset(key(id), encode(pass));
   await redis.sadd(IDS, id);
+  await bumpRev();
   return getPass(id);
 }
 
@@ -69,6 +82,7 @@ export async function patchPass(id, patch) {
   if (!Object.keys(fields).length) return getPass(id);
   if (!(await redis.exists(key(id)))) return null;
   await redis.hset(key(id), fields);
+  await bumpRev();
   return getPass(id);
 }
 
@@ -76,6 +90,7 @@ export async function deletePass(id) {
   const pass = await getPass(id);
   await redis.del(key(id));
   await redis.srem(IDS, id);
+  await bumpRev();
   return pass;
 }
 

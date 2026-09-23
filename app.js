@@ -2,6 +2,7 @@
 
 const $ = s => document.querySelector(s);
 const list = $('#list');
+const EMPTY = new Set();
 
 let passes = [];
 let sortKey = 'total';
@@ -10,6 +11,8 @@ let uploadFor = null;
 let editId = null;
 let lb = null;
 let authed = false;
+let rev = 0;            // Änderungszähler des Servers, zuletzt gesehen
+let inflight = 0;       // eigene Schreibvorgänge unterwegs
 const queues = {};
 
 /* ---------------------------------------------------------------- API --- */
@@ -38,7 +41,8 @@ const api = {
   session: () => req('/api/session'),
   login: password => req('/api/auth', { method: 'POST', body: { password } }),
   logout: () => req('/api/auth', { method: 'DELETE' }),
-  list: () => req('/api/passes').then(d => d.passes || []),
+  list: () => req('/api/passes'),
+  version: () => req('/api/version').then(d => d.rev ?? 0),
   create: data => req('/api/passes', { method: 'POST', body: data }).then(d => d.pass),
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
@@ -144,7 +148,7 @@ function recoverAuth() {
 
 /* ----------------------------------------------------------- Rendern --- */
 
-function render() {
+function render(changed = EMPTY) {
   // Während jemand in einer Notiz tippt, nicht unter den Fingern neu bauen.
   if (document.activeElement && document.activeElement.classList.contains('note')) { pendingRender = true; return; }
   pendingRender = false;
@@ -175,7 +179,7 @@ function render() {
     const photos = (p.photos || []).map(id =>
       `<img src="/api/photos/${encodeURIComponent(id)}" alt="Foto vom ${esc(p.de)}" loading="lazy" data-photo="${esc(id)}" data-pass="${esc(p.id)}">`
     ).join('');
-    return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}" data-id="${esc(p.id)}">
+    return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}">
       <div class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</div>
       <div>
         <div class="plate"><div class="plate-in">
@@ -216,6 +220,7 @@ function write(id, patch) {
   Object.assign(p, patch);
   render();
 
+  inflight++;
   queues[id] = (queues[id] || Promise.resolve())
     .then(() => api.patch(id, patch))
     .then(saved => {
@@ -228,17 +233,41 @@ function write(id, patch) {
       render();
       if (err.status === 401) return recoverAuth();
       toast(message(err));
+    })
+    .finally(() => {
+      inflight--;
+      // Eigene Änderung: der Zähler ist jetzt weiter, ohne dass sie fremd wäre.
+      touch();
+      api.version().then(v => { rev = v; }).catch(() => {});
     });
 }
 
-async function load() {
+async function load({ markChanges = false } = {}) {
   try {
-    passes = await api.list();
-    render();
+    const d = await api.list();
+    const fresh = d.passes || [];
+    const changed = markChanges ? diff(passes, fresh) : new Set();
+    passes = fresh;
+    if (typeof d.rev === 'number') rev = d.rev;
+    render(changed);
   } catch (err) {
     if (err.status === 401) return recoverAuth();
     list.innerHTML = '<li class="notice">Pässe konnten nicht geladen werden. Lade die Seite neu.</li>';
   }
+}
+
+// Welche Pässe haben sich gegenüber dem letzten Stand bewegt? Nur um sie
+// kurz aufleuchten zu lassen, wenn der andere etwas bewertet hat.
+function diff(oldList, newList) {
+  const before = new Map(oldList.map(p => [p.id, p]));
+  const out = new Set();
+  for (const p of newList) {
+    const b = before.get(p.id);
+    if (!b) { out.add(p.id); continue; }
+    if (b.fun !== p.fun || b.amb !== p.amb || (b.note || '') !== (p.note || '') ||
+        (b.photos || []).length !== (p.photos || []).length) out.add(p.id);
+  }
+  return out;
 }
 
 /* ---------------------------------------------------------- Ereignisse --- */
@@ -340,12 +369,170 @@ $('#lbDel').onclick = async () => {
   toast('Foto entfernt');
 };
 
+/* ------------------------------------------------ Passvorschläge --- */
+
+// 1811 Alpenpässe aus OpenStreetMap, einmal geladen und dann im Speicher
+// durchsucht. Die Datei ist klein genug, dass sich eine Suche über den
+// Server nicht lohnt – und beim Tippen antwortet sie sofort.
+let catalog = null;
+let catalogLoading = null;
+let picks = [];
+let cursor = -1;
+
+function loadCatalog() {
+  if (catalog) return Promise.resolve(catalog);
+  if (!catalogLoading) {
+    catalogLoading = fetch('/data/passes-alps.json')
+      .then(r => (r.ok ? r.json() : []))
+      .then(rows => {
+        catalog = rows.map(p => ({ ...p, hay: fold([p.n, p.it, p.lld, ...(p.a || [])].filter(Boolean).join(' ')) }));
+        return catalog;
+      })
+      .catch(() => (catalog = []));
+  }
+  return catalogLoading;
+}
+
+// Damit "Groedner", "grodner" und "Grödner" dasselbe finden.
+function fold(s) {
+  return String(s).toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Wortanfänge zuerst, dann alles andere. Kürzere Namen vor längeren, damit
+// "Sella" das Sellajoch über den Sellajochhäusern zeigt.
+function search(term, limit = 8) {
+  const q = fold(term.trim());
+  if (q.length < 2 || !catalog) return [];
+  const out = [];
+  for (const p of catalog) {
+    const i = p.hay.indexOf(q);
+    if (i < 0) continue;
+    const wordStart = i === 0 || /[\s\-/(]/.test(p.hay[i - 1]);
+    const primary = fold(p.n).startsWith(q);
+    out.push({ p, rank: primary ? 0 : wordStart ? 1 : 2, len: p.n.length });
+  }
+  out.sort((a, b) => a.rank - b.rank || a.len - b.len || a.p.n.localeCompare(b.p.n, 'de'));
+  return out.slice(0, limit).map(x => x.p);
+}
+
+function highlight(text, term) {
+  const q = fold(term.trim());
+  const i = fold(text).indexOf(q);
+  if (q.length < 2 || i < 0) return esc(text);
+  // fold() ändert die Länge nicht (ä→ae wäre eine Ausnahme), deshalb hier
+  // sicherheitshalber nur markieren, wenn die Längen zusammenpassen.
+  if (fold(text).length !== text.length) return esc(text);
+  return esc(text.slice(0, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length));
+}
+
+function showSuggestions(term) {
+  const box = $('#suggest');
+  const input = $('#editForm').de;
+  picks = search(term);
+  cursor = -1;
+
+  if (!term.trim() || term.trim().length < 2) {
+    box.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  if (!picks.length) {
+    box.innerHTML = '<li class="s-empty">Kein Pass gefunden – einfach selbst eintragen.</li>';
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    return;
+  }
+  box.innerHTML = picks.map((p, i) => {
+    const sub = [p.it, p.lld].filter(Boolean).join(' / ');
+    return `<li role="option" id="sug-${i}" data-i="${i}" aria-selected="false">
+      <span class="s-name">${highlight(p.n, term)}${sub ? `<span class="s-sub">${esc(sub)}</span>` : ''}</span>
+      ${p.alt ? `<span class="s-alt">${p.alt} m</span>` : ''}
+    </li>`;
+  }).join('');
+  box.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function hideSuggestions() {
+  $('#suggest').hidden = true;
+  $('#editForm').de.setAttribute('aria-expanded', 'false');
+  cursor = -1;
+}
+
+function moveCursor(step) {
+  if ($('#suggest').hidden || !picks.length) return;
+  cursor = (cursor + step + picks.length) % picks.length;
+  const items = [...$('#suggest').querySelectorAll('li[role="option"]')];
+  items.forEach((li, i) => li.setAttribute('aria-selected', i === cursor));
+  const active = items[cursor];
+  if (active) {
+    active.scrollIntoView({ block: 'nearest' });
+    $('#editForm').de.setAttribute('aria-activedescendant', active.id);
+  }
+}
+
+// Übernimmt einen Vorschlag: Namen und Höhe stehen im Datensatz, die Gegend
+// wird einmal nachgeschlagen und serverseitig gemerkt.
+async function applyPick(p) {
+  const f = $('#editForm');
+  f.de.value = p.n;
+  f.intl.value = p.it || '';
+  f.lad.value = p.lld || '';
+  f.alt.value = p.alt || '';
+  hideSuggestions();
+
+  if (!f.region.value.trim() && typeof p.lat === 'number') {
+    const note = $('#regionNote');
+    if (note) { note.textContent = 'suche Gegend …'; note.hidden = false; }
+    try {
+      const d = await req(`/api/place?lat=${p.lat}&lon=${p.lon}`);
+      if (d.region && !f.region.value.trim()) {
+        f.region.value = d.region;
+        if (note) { note.textContent = 'automatisch ergänzt, änderbar'; note.hidden = false; }
+      } else if (note) { note.hidden = true; }
+    } catch {
+      if (note) note.hidden = true;   // ohne Netz bleibt das Feld eben leer
+    }
+  }
+  f.intl.focus();
+}
+
+$('#editForm').de.addEventListener('input', e => {
+  if (editId) return;                 // beim Bearbeiten nicht dazwischenreden
+  loadCatalog().then(() => {
+    if (document.activeElement === e.target) showSuggestions(e.target.value);
+  });
+});
+
+$('#editForm').de.addEventListener('keydown', e => {
+  if ($('#suggest').hidden) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); }
+  else if (e.key === 'Enter' && cursor >= 0) { e.preventDefault(); applyPick(picks[cursor]); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hideSuggestions(); }
+});
+
+$('#suggest').addEventListener('pointerdown', e => {
+  const li = e.target.closest('li[data-i]');
+  if (!li) return;
+  e.preventDefault();                 // Fokus im Feld lassen
+  applyPick(picks[+li.dataset.i]);
+});
+
+$('#editForm').de.addEventListener('blur', () => setTimeout(hideSuggestions, 120));
+
 /* ------------------------------------------------------- Pass-Dialog --- */
 
 function openEdit(id) {
   editId = id;
   const f = $('#editForm');
   f.reset();
+  hideSuggestions();
+  const note = $('#regionNote');
+  if (note) note.hidden = true;
+  if (!id) loadCatalog();
   const p = id ? passes.find(x => x.id === id) : null;
   $('#editTitle').textContent = p ? 'Pass bearbeiten' : 'Pass hinzufügen';
   $('#delPass').hidden = !p;
@@ -417,21 +604,60 @@ $('#logout').onclick = async () => {
   await load();
 };
 
-/* ------------------------------------------------- Frischhalten & Boot --- */
+/* ----------------------------------------------------- Live-Abgleich --- */
 
-// Kein Realtime mehr wie im Artifact, deshalb beim Zurückkommen neu laden.
-// Ruhig bleiben, solange ein Dialog offen ist oder jemand tippt.
+// Zu zweit unterwegs: /api/version ist eine winzige Zahl, die bei jeder
+// Änderung hochgeht. Nur wenn sie sich bewegt hat, wird die Liste geholt.
+// Solange gemeinsam bewertet wird, alle 3 Sekunden; danach zieht sich der
+// Takt zurück, damit ein vergessener Tab nicht stundenlang pollt.
+const FAST = 3000, SLOW = 15000, IDLE = 60000;
+let lastActivity = Date.now();
+let syncTimer = null;
+
+function touch() { lastActivity = Date.now(); }
+
+function interval() {
+  const quiet = Date.now() - lastActivity;
+  if (quiet < 2 * 60 * 1000) return FAST;
+  if (quiet < 10 * 60 * 1000) return SLOW;
+  return IDLE;
+}
+
+// Nicht abgleichen, während ein Dialog offen ist, jemand eine Notiz tippt oder
+// eigene Änderungen noch unterwegs sind – sonst überschreibt der Server, was
+// gerade erst lokal passiert ist.
 function busy() {
-  return document.querySelector('dialog[open]') ||
+  return inflight > 0 ||
+    document.querySelector('dialog[open]') ||
     (document.activeElement && document.activeElement.classList.contains('note'));
 }
 
+async function tick() {
+  syncTimer = null;
+  if (authed && document.visibilityState === 'visible' && !busy()) {
+    try {
+      const v = await api.version();
+      if (v !== rev) {
+        rev = v;
+        touch();
+        await load({ markChanges: true });
+      }
+    } catch (err) {
+      if (err.status === 401) await recoverAuth();
+    }
+  }
+  schedule();
+}
+
+function schedule() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(tick, document.visibilityState === 'visible' ? interval() : IDLE);
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && authed && !busy()) load();
+  if (document.visibilityState === 'visible') { touch(); schedule(); tick(); }
 });
-setInterval(() => {
-  if (document.visibilityState === 'visible' && authed && !busy()) load();
-}, 45000);
+list.addEventListener('pointerdown', touch);
 
 (async () => {
   let s;
@@ -445,4 +671,5 @@ setInterval(() => {
   $('#addPass').hidden = false;
   $('#logout').hidden = false;
   await load();
+  schedule();
 })();

@@ -1,5 +1,5 @@
 import { guard } from '../_lib/auth.js';
-import { listPasses, putPass, makeId, nextOrder } from '../_lib/store.js';
+import { listPasses, putPass, makeId, nextOrder, getRev } from '../_lib/store.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -7,7 +7,8 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      return res.status(200).json({ passes: await listPasses() });
+      const [passes, rev] = await Promise.all([listPasses(), getRev()]);
+      return res.status(200).json({ passes, rev });
     } catch (e) {
       return res.status(500).json({ error: 'store_unavailable', detail: String(e.message || e) });
     }
