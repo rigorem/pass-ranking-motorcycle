@@ -1,6 +1,6 @@
 import { guard } from '../_lib/auth.js';
 import { redis, photoKey } from '../_lib/store.js';
-import { del as deleteBlob } from '@vercel/blob';
+import { get as getBlob, del as deleteBlob } from '@vercel/blob';
 
 export default async function handler(req, res) {
   // Der Wächter steht bewusst auch vor GET: nur wer das Passwort kennt,
@@ -10,23 +10,23 @@ export default async function handler(req, res) {
   const id = String(req.query.id || '').replace(/\.[a-z0-9]+$/i, '');
   if (!id) return res.status(400).json({ error: 'id_required' });
 
-  let url;
+  let path;
   try {
-    url = await redis.get(photoKey(id));
+    path = await redis.get(photoKey(id));
   } catch (e) {
     return res.status(500).json({ error: 'store_unavailable' });
   }
-  if (!url) {
+  if (!path) {
     res.setHeader('Cache-Control', 'no-store');
     return res.status(404).json({ error: 'not_found' });
   }
 
   if (req.method === 'GET') {
     try {
-      const upstream = await fetch(String(url));
-      if (!upstream.ok) return res.status(502).json({ error: 'blob_unavailable' });
-      const body = Buffer.from(await upstream.arrayBuffer());
-      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/jpeg');
+      const found = await getBlob(String(path), { access: 'private' });
+      if (!found || found.statusCode !== 200) return res.status(502).json({ error: 'blob_unavailable' });
+      const body = Buffer.from(await new Response(found.stream).arrayBuffer());
+      res.setHeader('Content-Type', found.blob.contentType || 'image/jpeg');
       res.setHeader('Content-Length', String(body.length));
       // private: Fotos dürfen im Browser liegen, aber in keinem geteilten Cache.
       res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     res.setHeader('Cache-Control', 'no-store');
     try {
-      await deleteBlob(String(url));
+      await deleteBlob(String(path));
       await redis.del(photoKey(id));
       return res.status(200).json({ deleted: id });
     } catch (e) {

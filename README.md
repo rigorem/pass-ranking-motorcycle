@@ -33,8 +33,9 @@ sind Barlow und Barlow Condensed von Google Fonts.
 - **Upstash Redis** hält die Pässe, einen Hash pro Pass (`pass:<id>`), dazu ein
   Set `passes:ids`. Bewertungen werden feldweise geschrieben, zwei Leute können
   also gleichzeitig unterwegs sein, ohne sich gegenseitig zu überschreiben.
-- **Vercel Blob** hält die Fotos. Die Blob-URL steht nur in Redis
-  (`photo:<id>`) und wird nie an den Browser gegeben.
+- **Vercel Blob** (privater Store) hält die Fotos. In Redis steht unter
+  `photo:<id>` nur der Pfad im Store; ausgeliefert werden die Bilder von
+  `/api/photos/<id>`, das sie mit dem Store-Token holt und durchreicht.
 
 ## Passwortschutz
 
@@ -48,10 +49,10 @@ Die Passwortabfrage im Browser ist nur die Tür, nicht das Schloss: das Schloss
 sitzt in `api/_lib/auth.js`. Wer die Seite ohne Anmeldung aufruft, bekommt vom
 Server keine Daten und keine Bilder.
 
-Ein bewusster Rest: die Fotos liegen in einem öffentlichen Blob-Store unter
-unerratbaren URLs (Zufalls-Suffix). Diese URLs verlassen den Server nicht, wer
-eine aber kennt, käme daran vorbei. Für Urlaubsfotos ist das in Ordnung – für
-etwas Heikleres müsste der Blob-Store auf privaten Zugriff umgestellt werden.
+Der Blob-Store läuft auf **privatem** Zugriff. Die Bilder sind von außen also
+auch mit der richtigen URL nicht abrufbar, sie lassen sich nur mit dem
+Store-Token lesen – und das liegt allein auf dem Server. In Redis steht nur der
+Pfad im Store, nie eine abrufbare Adresse.
 
 Ohne `SESSION_SECRET` wird der Signaturschlüssel aus `APP_PASSWORD` abgeleitet.
 Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
@@ -61,7 +62,8 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
 1. Repository in Vercel importieren. Framework: **Other**, kein Build-Command.
 2. Im Projekt unter **Storage** anlegen:
    - **Upstash Redis** → setzt `UPSTASH_REDIS_REST_URL` und `UPSTASH_REDIS_REST_TOKEN`
-   - **Blob** → setzt `BLOB_READ_WRITE_TOKEN`
+   - **Blob** → setzt `BLOB_READ_WRITE_TOKEN`. Der Store muss auf **private**
+     stehen; die App lädt Fotos ausdrücklich mit `access: 'private'` hoch.
 3. Unter **Settings → Environment Variables** `APP_PASSWORD` setzen.
    Optional `SESSION_SECRET` (`openssl rand -hex 32`).
 4. Deployen.

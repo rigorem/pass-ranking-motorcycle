@@ -37,16 +37,16 @@ export default async function handler(req, res) {
     const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp'
       : type === 'image/gif' ? 'gif' : type === 'image/heic' ? 'heic' : 'jpg';
 
-    // addRandomSuffix macht die Blob-URL unerratbar. Sie wird nur hier in Redis
-    // abgelegt und nie an den Browser gegeben – ausgeliefert wird über
-    // /api/photos/<id>, und das prüft vorher die Session.
+    // Privater Store: das Blob ist ohne Token von außen gar nicht abrufbar.
+    // In Redis liegt nur der Pfad, ausgeliefert wird über /api/photos/<id>,
+    // und das prüft vorher die Session.
     const blob = await put(`photos/${id}.${ext}`, data, {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: true,
       contentType: type
     });
 
-    await redis.set(photoKey(id), blob.url);
+    await redis.set(photoKey(id), blob.pathname);
     return res.status(201).json({ id });
   } catch (e) {
     return res.status(500).json({ error: 'upload_failed', detail: String(e.message || e) });
