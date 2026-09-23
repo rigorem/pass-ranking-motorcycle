@@ -7,8 +7,10 @@ import { put, get as getBlob } from '@vercel/blob';
 // OpenStreetMap geholt und über eine Karte gelegt. Beides – Straßenverlauf und
 // fertiges Bild – wird genau einmal besorgt und dann gespeichert; danach
 // kostet ein Aufruf nichts mehr bei den fremden Diensten.
-const KEY = () => process.env.MAPTILER_KEY || '';
-const STYLE = process.env.MAPTILER_STYLE || 'outdoor-v2';
+// Beim Einfügen ins Dashboard rutscht leicht ein Leerzeichen oder Zeilenumbruch
+// mit; kodiert landet der dann als %20 im Schlüssel und der Dienst lehnt ab.
+const KEY = () => (process.env.MAPTILER_KEY || '').trim();
+const STYLE = (process.env.MAPTILER_STYLE || 'outdoor-v2').trim();
 const STROKE = 'C94F83';
 
 const SIZES = {
@@ -134,7 +136,11 @@ export default async function handler(req, res) {
       tried.push({ attempt: label, error: String(e.name || e.message || e) });
     }
   }
-  if (!data) return fail(502, { error: 'map_unavailable', tried, style: STYLE, sentReferer: origin || null });
+  if (!data) return fail(502, {
+    error: 'map_unavailable', tried, style: STYLE,
+    sentReferer: origin || null,
+    keyLength: KEY().length          // nur die Länge, nie der Schlüssel selbst
+  });
 
   // Nur behalten, wenn das Bild den endgültigen Stand zeigt. Ein Notbehelf
   // ohne Straßenverlauf würde sonst für immer hängenbleiben.
