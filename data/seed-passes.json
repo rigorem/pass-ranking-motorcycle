@@ -1,0 +1,9 @@
+[
+  {"id":"penserjoch","de":"Penser Joch","intl":"Passo di Pennes","lad":"","alt":2211,"region":"Sarntal – Sterzing","fun":null,"amb":null,"note":"","photos":[],"order":1},
+  {"id":"jaufenpass","de":"Jaufenpass","intl":"Passo del Giovo","lad":"","alt":2094,"region":"Sterzing – St. Leonhard in Passeier","fun":null,"amb":null,"note":"","photos":[],"order":2},
+  {"id":"timmelsjoch","de":"Timmelsjoch","intl":"Passo del Rombo","lad":"","alt":2474,"region":"Ötztal (AT) – Passeiertal (IT)","fun":null,"amb":null,"note":"","photos":[],"order":3},
+  {"id":"campolongo","de":"Campolongopass","intl":"Passo di Campolongo","lad":"","alt":1875,"region":"Corvara – Arabba","fun":null,"amb":null,"note":"","photos":[],"order":4},
+  {"id":"groednerjoch","de":"Grödner Joch","intl":"Passo Gardena","lad":"Jëuf de Frea","alt":2121,"region":"Gröden – Gadertal","fun":null,"amb":null,"note":"","photos":[],"order":5},
+  {"id":"sellajoch","de":"Sellajoch","intl":"Passo Sella","lad":"Jëuf de Sela","alt":2240,"region":"Gröden – Fassatal","fun":null,"amb":null,"note":"","photos":[],"order":6},
+  {"id":"pordoijoch","de":"Pordoijoch","intl":"Passo Pordoi","lad":"Ju de Pordoi","alt":2239,"region":"Arabba – Canazei","fun":null,"amb":null,"note":"","photos":[],"order":7}
+]
