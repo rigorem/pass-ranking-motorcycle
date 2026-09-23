@@ -4,6 +4,11 @@ const $ = s => document.querySelector(s);
 const list = $('#list');
 const EMPTY = new Set();
 
+// Kartenbilder werden im Browser eine Woche lang behalten. Ändert sich, wie
+// sie gezeichnet werden, muss sich auch die Adresse ändern – sonst zeigt ein
+// Gerät, das schon einmal geladen hat, für Tage das alte Bild.
+const MAP_VERSION = 2;
+
 let passes = [];
 let sortKey = 'total';
 let pendingRender = false;
@@ -234,7 +239,7 @@ function cover(p) {
   if (!hasPlace(p)) return '<span class="cover blank" aria-hidden="true"></span>';
   return `<a class="cover" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener"
     data-map="${esc(p.id)}" aria-label="Strecke über den ${esc(p.de)} ansehen">
-    <img src="/api/map/${encodeURIComponent(p.id)}" alt="" loading="lazy" data-map="${esc(p.id)}"
+    <img src="/api/map/${encodeURIComponent(p.id)}?v=${MAP_VERSION}" alt="" loading="lazy" data-map="${esc(p.id)}"
          onerror="this.closest('.cover').classList.add('blank')">
     <svg class="cover-pin" viewBox="0 0 24 24" aria-hidden="true"><path
       d="M12 2c-3.9 0-7 3.1-7 7 0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></a>`;
@@ -595,7 +600,7 @@ function openMap(p) {
   img.hidden = false;
   img.alt = 'Straßenverlauf über den ' + p.de;
   img.onerror = () => { img.hidden = true; fail.hidden = false; };
-  img.src = `/api/map/${encodeURIComponent(p.id)}?size=large`;
+  img.src = `/api/map/${encodeURIComponent(p.id)}?size=large&v=${MAP_VERSION}`;
   $('#mapTitle').textContent = p.alt ? `${p.de} · ${p.alt} m` : p.de;
   $('#mapOpen').href = mapsUrl(p);
   $('#mapDlg').showModal();
