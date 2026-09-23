@@ -2,7 +2,7 @@ import { guard } from '../_lib/auth.js';
 import { getPass, patchPass, redis } from '../_lib/store.js';
 import { routeFor, encodePolyline, decodePolyline } from '../_lib/route.js';
 import { renderMap } from '../_lib/tilemap.js';
-import { put, get as getBlob } from '@vercel/blob';
+import { put, get as getBlob, del as deleteBlob } from '@vercel/blob';
 
 // Das Kartenbild eines Passes: die Passstraße mit ihren Kehren, aus
 // OpenStreetMap geholt und über eine Karte gelegt. Beides – Straßenverlauf und
@@ -89,10 +89,22 @@ export default async function handler(req, res) {
   const size = SIZES[req.query.size] ? String(req.query.size) : 'thumb';
   const [W, H] = SIZES[size];
 
-  try {
-    const cached = await redis.get(blobKey(id, size));
-    if (cached && await send(res, cached)) return;
-  } catch { /* weiter, dann eben neu rendern */ }
+  // ?refresh=1 wirft nur das fertige Bild weg, nicht den Straßenverlauf –
+  // nach einer Stil- oder Darstellungsänderung baut es sich so neu auf, ohne
+  // dass Overpass erneut befragt werden muss.
+  const refresh = req.query.refresh === '1';
+  if (refresh) {
+    try {
+      const old = await redis.get(blobKey(id, size));
+      if (old) await deleteBlob(String(old));
+      await redis.del(blobKey(id, size));
+    } catch { /* dann wird es eben überschrieben */ }
+  } else {
+    try {
+      const cached = await redis.get(blobKey(id, size));
+      if (cached && await send(res, cached)) return;
+    } catch { /* weiter, dann eben neu rendern */ }
+  }
 
   const fail = (code, body) => {
     res.setHeader('Cache-Control', 'no-store');
