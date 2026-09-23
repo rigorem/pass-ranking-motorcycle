@@ -62,10 +62,11 @@ function withRoute(enc, w, h) {
     + `?path=${path}&padding=0.12&key=${encodeURIComponent(KEY())}&attribution=bottomright`;
 }
 
+// Ohne Marker: die Markierungssyntax ist bei jedem Kartendienst anders, und
+// die eingezeichnete Straße ist ohnehin die Auskunft, um die es geht.
 function centred(lat, lon, w, h) {
-  const marker = `${lon},${lat},pin-s+${STROKE}`;
   return `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/static/${lon},${lat},11/${w}x${h}@2x.png`
-    + `?key=${encodeURIComponent(KEY())}&markers=${encodeURIComponent(marker)}&attribution=bottomright`;
+    + `?key=${encodeURIComponent(KEY())}&attribution=bottomright`;
 }
 
 export default async function handler(req, res) {
@@ -105,19 +106,28 @@ export default async function handler(req, res) {
   const { enc, settled } = await polylineFor(id, pass);
 
   // Erst mit Straßenverlauf versuchen, sonst schlicht auf den Pass zentriert.
-  const attempts = enc ? [withRoute(enc, W, H), centred(lat, lon, W, H)] : [centred(lat, lon, W, H)];
-  let data = null;
-  for (const url of attempts) {
+  const attempts = enc
+    ? [['route', withRoute(enc, W, H)], ['centred', centred(lat, lon, W, H)]]
+    : [['centred', centred(lat, lon, W, H)]];
+
+  let data = null, used = null;
+  const tried = [];
+  for (const [label, url] of attempts) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (r.ok) { data = Buffer.from(await r.arrayBuffer()); break; }
-    } catch { /* nächster Versuch */ }
+      if (r.ok) { data = Buffer.from(await r.arrayBuffer()); used = label; break; }
+      // Sagen, woran es lag – sonst rät man beim nächsten Fehler wieder.
+      const why = (await r.text().catch(() => '')).slice(0, 200);
+      tried.push({ attempt: label, status: r.status, message: why });
+    } catch (e) {
+      tried.push({ attempt: label, error: String(e.name || e.message || e) });
+    }
   }
-  if (!data) return fail(502, { error: 'map_unavailable' });
+  if (!data) return fail(502, { error: 'map_unavailable', tried, style: STYLE });
 
   // Nur behalten, wenn das Bild den endgültigen Stand zeigt. Ein Notbehelf
   // ohne Straßenverlauf würde sonst für immer hängenbleiben.
-  if (settled) {
+  if (settled && !(enc && used !== 'route')) {
     try {
       const blob = await put(`maps/${id}-${size}.png`, data, {
         access: 'private', addRandomSuffix: true, contentType: 'image/png', allowOverwrite: true
@@ -130,6 +140,7 @@ export default async function handler(req, res) {
 
   res.setHeader('Content-Type', 'image/png');
   res.setHeader('Content-Length', String(data.length));
+  res.setHeader('X-Map-Kind', used);
   res.setHeader('Cache-Control', 'private, max-age=604800');
   res.status(200).end(data);
 }
