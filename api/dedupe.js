@@ -2,12 +2,13 @@ import { guardWrite } from './_lib/auth.js';
 import { redis, listPasses, patchPass, photoKey } from './_lib/store.js';
 import { shaKey, hashKey, isVideoId } from './_lib/photos.js';
 import { listInbox, dropInbox, bumpInboxRev } from './_lib/inbox.js';
-import { get as getBlob, del as deleteBlob } from '@vercel/blob';
+import { readFile, deleteFile } from './_lib/files.js';
+import crypto from 'node:crypto';
 
 // Doppelte Fotos finden und entfernen.
 //
 // Verglichen werden die Bytes, nicht die Dateinamen – dasselbe Bild zweimal
-// hochgeladen ergibt zwei Blobs, die sonst niemandem auffallen. Seit dem
+// hochgeladen ergibt zwei Dateien, die sonst niemandem auffallen. Seit dem
 // Upload wird der Fingerabdruck mitgeschrieben; für ältere Fotos holt diese
 // Funktion ihn einmal nach und merkt ihn sich.
 //
@@ -23,11 +24,9 @@ async function shaOf(id) {
 
   const path = await redis.get(photoKey(id));
   if (!path) return null;                       // verwaister Verweis
-  const found = await getBlob(String(path), { access: 'private' });
-  if (!found || found.statusCode !== 200) return null;
+  const bytes = await readFile(String(path));
+  if (!bytes) return null;
 
-  const bytes = Buffer.from(await new Response(found.stream).arrayBuffer());
-  const crypto = await import('node:crypto');
   const sha = crypto.createHash('sha256').update(bytes).digest('hex');
   try { await redis.set(shaKey(id), sha); } catch { /* nächstes Mal wieder */ }
   return sha;
@@ -36,7 +35,7 @@ async function shaOf(id) {
 async function forget(id) {
   try {
     const path = await redis.get(photoKey(id));
-    if (path) await deleteBlob(String(path));
+    if (path) await deleteFile(String(path));
     await redis.del(photoKey(id));
     const sha = await redis.get(shaKey(id));
     if (sha) {
@@ -45,7 +44,7 @@ async function forget(id) {
       if (String(owner) === id) await redis.del(hashKey(String(sha)));
     }
     await redis.del(shaKey(id));
-  } catch { /* ein übrig gebliebenes Blob ist kein Grund abzubrechen */ }
+  } catch { /* eine übrig gebliebene Datei ist kein Grund abzubrechen */ }
 }
 
 export default async function handler(req, res) {

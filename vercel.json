@@ -1,26 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/map/[id].js": { "maxDuration": 30 },
-    "api/place.js": { "maxDuration": 15 },
-    "api/dedupe.js": { "maxDuration": 60 }
-  },
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "same-origin" }
-      ]
-    },
-    {
-      "source": "/",
-      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
-    },
-    {
-      "source": "/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
-    }
-  ]
+  "git": { "deploymentEnabled": false }
 }

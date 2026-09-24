@@ -1,10 +1,6 @@
-import { Redis } from '@upstash/redis';
+import { redis } from './redis.js';
 
-// Die Vercel-Integration setzt je nach Alter des Projekts UPSTASH_* oder KV_*.
-const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-
-export const redis = new Redis({ url, token });
+export { redis };
 
 const IDS = 'passes:ids';
 const REV = 'passes:rev';

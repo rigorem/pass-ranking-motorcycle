@@ -2,24 +2,19 @@
 // wurden. Gesucht wird über den Katalog, nach deutschem, italienischem und
 // ladinischem Namen sowie den Nebenschreibweisen.
 //
-//   node --env-file=.env.local scripts/backfill-coords.mjs          – zeigt nur an
-//   node --env-file=.env.local scripts/backfill-coords.mjs --write  – schreibt
+//   node scripts/backfill-coords.mjs          – zeigt nur an
+//   node scripts/backfill-coords.mjs --write  – schreibt
+//
+// Schreibt in das Redis aus REDIS_URL (Vorgabe: redis://127.0.0.1:6379).
 
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Redis } from '@upstash/redis';
+import { redis } from '../api/_lib/redis.js';
 
 const write = process.argv.includes('--write');
 const here = dirname(fileURLToPath(import.meta.url));
 
-const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-if (!url || !token) {
-  console.error('Fehlt: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN');
-  process.exit(1);
-}
-const redis = new Redis({ url, token });
 
 const fold = s => String(s).toLowerCase()
   .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
@@ -55,3 +50,4 @@ for (const id of ids) {
 if (write && done) await redis.incr('passes:rev');
 console.log(`\n${done} ${write ? 'ergänzt' : 'zu ergänzen'}, ${already} hatten schon Koordinaten, ${missing} ohne Treffer.`);
 if (!write && done) console.log('Zum Schreiben nochmal mit --write aufrufen.');
+await redis.quit();

@@ -1,7 +1,6 @@
 // Pässeranking – Frontend. Spricht ausschließlich mit den eigenen /api-Routen.
 
 import { readExif } from '/exif.js';
-import { upload as blobUpload } from '/vendor/blob-client.js';
 
 // Videos sind zu groß für den Rumpf einer Vercel-Funktion (4,5 MB). Sie gehen
 // deshalb mit einem befristeten Schlüssel direkt vom Browser in den Blob-Store
@@ -70,8 +69,6 @@ const api = {
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
   upload: blob => req('/api/photos', { method: 'POST', body: blob }).then(d => d.id),
-  uploadToken: (contentType, size) => req('/api/videos', { method: 'POST', body: { step: 'token', contentType, size } }),
-  registerVideo: data => req('/api/videos', { method: 'POST', body: { step: 'register', ...data } }),
   // Der Weg mit Ortsangabe: der Server sucht sich den Pass selbst.
   importPhoto: (blob, meta) => req('/api/import', {
     method: 'POST',
@@ -98,8 +95,7 @@ function message(err) {
     case 'pass_id_required': return 'Bitte erst einen Pass auswählen.';
     case 'dedupe_failed': return 'Die Suche nach Doppeln ist fehlgeschlagen.';
     case 'too_large': return 'Das Video ist zu groß (mehr als 300 MB).';
-    case 'blob_not_configured': return 'Der Videospeicher ist noch nicht eingerichtet.';
-    case 'bad_pathname': return 'Das Video konnte nicht eingetragen werden.';
+    case 'upload_failed': return 'Das Video konnte nicht gespeichert werden.';
     case 'unsupported_type': return 'Dieses Bildformat geht nicht.';
     default: return 'Speichern fehlgeschlagen. Bitte nochmal versuchen.';
   }
@@ -504,23 +500,32 @@ list.addEventListener('focusout', e => {
 
 // Vor dem Upload verkleinern: spart Speicher und lädt am Berg schneller.
 // Gibt die Id des angelegten Videos zurück. `onProgress` bekommt 0..1.
-async function sendVideo(file, passId, onProgress) {
+// Videos gehen unverkleinert in einem Stück an den Server. XMLHttpRequest statt
+// fetch, weil nur das den Fortschritt beim Hochladen meldet.
+const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+
+function sendVideo(file, passId, onProgress) {
   const type = String(file.type || '').split(';')[0];
-  const { token, pathname } = await api.uploadToken(type, file.size);
-  const blob = await blobUpload(pathname, file, {
-    access: 'private',
-    token,
-    contentType: type,
-    multipart: file.size > 8 * 1024 * 1024,
-    onUploadProgress: p => onProgress && onProgress((p && p.percentage != null ? p.percentage / 100 : 0))
-  });
-  const d = await api.registerVideo({
-    pathname: blob.pathname || pathname,
-    contentType: type,
+  if (file.size > MAX_VIDEO_BYTES) return Promise.reject(new ApiError(413, 'too_large'));
+  const qs = new URLSearchParams({
     passId: passId || '',
     taken: new Date(file.lastModified || Date.now()).toISOString()
   });
-  return d.id;
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/videos?' + qs);
+    x.setRequestHeader('Content-Type', type);
+    x.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    x.onload = () => {
+      let data = {};
+      try { data = JSON.parse(x.responseText || '{}'); } catch { /* leer lassen */ }
+      if (x.status === 401) { authed = false; return reject(new ApiError(401, 'unauthorized')); }
+      if (x.status < 200 || x.status >= 300) return reject(new ApiError(x.status, data.error));
+      resolve(data.id);
+    };
+    x.onerror = () => reject(new ApiError(0, 'offline'));
+    x.send(file);
+  });
 }
 
 async function shrink(file) {

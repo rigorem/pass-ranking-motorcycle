@@ -1,7 +1,8 @@
 # Pässeranking
 
 Bewertung von Motorradpässen in den Dolomiten und Südtirol nach **Fahrspaß** und
-**Ambiente**, mit Notizen und Fotos. Passwortgeschützt, läuft auf Vercel.
+**Ambiente**, mit Notizen, Fotos und Videos. Passwortgeschützt, läuft auf einem
+eigenen Server bei Hetzner.
 
 Ursprünglich ein Claude Artifact, inzwischen eine eigenständige App ohne
 Bindung an Claude.
@@ -12,14 +13,16 @@ Bindung an Claude.
 index.html             Markup
 styles.css             Gestaltung, hell und dunkel
 app.js                 Frontend – spricht nur mit /api
+server.mjs             Node-Server: findet die Routen unter api/ und führt sie aus
 api/
   session.js           GET  – bin ich angemeldet? (?poll=1: Änderungszähler)
   auth.js              POST – anmelden, DELETE – abmelden
   place.js             GET  – Koordinate -> Gegend (Nominatim, gecacht)
   import.js            POST – Foto vom Handy, ordnet nach Koordinaten zu
-  videos.js            POST – Schlüssel fürs Hochladen und Eintrag danach
+  videos.js            POST – Video hochladen, direkt auf die Platte
   inbox.js             GET/POST – Fotos ohne sichere Zuordnung
-  _lib/photos.js       Ablegen im Blob, gemeinsam für Upload und Import
+  _lib/photos.js       Fotos ablegen, gemeinsam für Upload und Import
+  _lib/files.js        Dateien auf der Platte, Ausliefern mit Range
   _lib/inbox.js        Der Eingang
   map/[id].js          GET  – Kartenbild mit Streckenverlauf
   _lib/route.js        Straßenverlauf über den Pass aus OpenStreetMap
@@ -29,25 +32,40 @@ api/
   photos/index.js      POST – Foto hochladen
   photos/[id].js       GET  – Foto ausliefern, DELETE – Foto löschen
   _lib/auth.js         Passwortprüfung und Session-Cookie
-  _lib/store.js        Redis-Zugriff und Datenform
+  _lib/store.js        Datenform der Pässe
+  _lib/redis.js        Redis-Zugang (lokal, verhält sich wie @upstash/redis)
 data/seed-passes.json  Die sieben Pässe für den ersten Start
 data/passes-alps.json  1811 Alpenpässe für die Namensvorschläge
 scripts/seed.mjs       Spielt die sieben Pässe in Redis ein
 scripts/build-passes.mjs  Baut den Pässe-Katalog aus OpenStreetMap
 scripts/backfill-coords.mjs  Trägt Koordinaten bei alten Pässen nach
+scripts/migrate-from-vercel.mjs  Einmalig: Daten aus Upstash und Vercel Blob holen
+deploy/                Caddyfile, systemd-Dienst, Einrichtung und Ausrollen
+.github/workflows/deploy.yml  Rollt jeden Push auf main aus
 ```
 
 Kein Build-Schritt, kein Framework, keine externen Ressourcen im Browser –
-die Oberfläche nutzt die Systemschrift des Geräts.
+die Oberfläche nutzt die Systemschrift des Geräts. Die einzige Abhängigkeit
+auf dem Server ist der Redis-Client.
+
+Die Routen unter `api/` stammen aus der Zeit auf Vercel und sind so
+geblieben: `server.mjs` stellt ihnen dieselben Hilfen bereit (`req.query`,
+einen gelesenen `req.body`, `res.status().json()`), und `api/_lib/redis.js`
+verhält sich wie der Upstash-Client, für den sie geschrieben wurden.
 
 ## Speicher
 
-- **Upstash Redis** hält die Pässe, einen Hash pro Pass (`pass:<id>`), dazu ein
-  Set `passes:ids`. Bewertungen werden feldweise geschrieben, zwei Leute können
+- **Redis** auf demselben Server, nur über localhost erreichbar, mit
+  Append-Only-Datei (jede Änderung ist nach spätestens einer Sekunde auf der
+  Platte). Es hält die Pässe, einen Hash pro Pass (`pass:<id>`), dazu ein Set
+  `passes:ids`. Bewertungen werden feldweise geschrieben, zwei Leute können
   also gleichzeitig unterwegs sein, ohne sich gegenseitig zu überschreiben.
-- **Vercel Blob** (privater Store) hält die Fotos. In Redis steht unter
-  `photo:<id>` nur der Pfad im Store; ausgeliefert werden die Bilder von
-  `/api/photos/<id>`, das sie mit dem Store-Token holt und durchreicht.
+- **Dateien** – Fotos, Videos, Kartenbilder – liegen unter
+  `$DATA_DIR/blobs/` (`photos/…`, `videos/…`, `maps/…`). In Redis steht unter
+  `photo:<id>` nur der Pfad; ausgeliefert wird über `/api/photos/<id>`.
+
+Auf dem Server liegt `$DATA_DIR` auf einem Hetzner-Volume:
+`/srv/passeranking/data`, darin `blobs/` und `redis/`.
 
 ## Passwortschutz und Gastansicht
 
@@ -76,58 +94,142 @@ Die Passwortabfrage im Browser ist nur die Tür, nicht das Schloss: das Schloss
 sitzt in `api/_lib/auth.js`. Wer die Seite ohne Anmeldung aufruft, bekommt vom
 Server keine Daten und keine Bilder.
 
-Der Blob-Store läuft auf **privatem** Zugriff. Die Bilder sind von außen also
-auch mit der richtigen URL nicht abrufbar, sie lassen sich nur mit dem
-Store-Token lesen – und das liegt allein auf dem Server. In Redis steht nur der
-Pfad im Store, nie eine abrufbare Adresse.
+Die Dateien liegen außerhalb dessen, was Caddy ausliefert: öffentlich sind
+nur `index.html`, `styles.css`, `app.js`, `exif.js`, `img/` und der
+Pässe-Katalog, alles andere antwortet mit 404. Fotos und Videos kommen
+ausschließlich über `/api/photos/<id>`, und das prüft vorher die Sitzung.
 
 Ohne `SESSION_SECRET` wird der Signaturschlüssel aus `APP_PASSWORD` abgeleitet.
 Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
 
-## Einrichten auf Vercel
+## Betrieb auf Hetzner
 
-1. Repository in Vercel importieren. Framework: **Other**, kein Build-Command.
-2. Im Projekt unter **Storage** anlegen:
-   - **Upstash Redis** → setzt `UPSTASH_REDIS_REST_URL` und `UPSTASH_REDIS_REST_TOKEN`
-   - **Blob** → setzt `BLOB_READ_WRITE_TOKEN`. Der Store muss auf **private**
-     stehen; die App lädt Fotos ausdrücklich mit `access: 'private'` hoch.
-3. Unter **Settings → Environment Variables** setzen:
+```
+Browser ──HTTPS──> Caddy ── Seite (index.html, app.js, styles.css, img/, Katalog)
+                     └─ /api/* ──> Node (server.mjs, systemd) ──> Redis (localhost)
+                                        └─ Dateien: /srv/passeranking/data/blobs
+```
+
+**Server:** Hetzner Cloud, kleinster x86-Tarif mit geteilten vCPUs (2 vCPU,
+4 GB RAM), Ubuntu 24.04, Standort Nürnberg oder Falkenstein. Dazu ein
+**Volume** mit 50–100 GB für Fotos und Videos – es lässt sich später
+vergrößern, ohne den Server anzufassen. Bei der Bestellung die automatischen
+Backups einschalten; das Volume sichern sie allerdings nicht mit (siehe unten).
+
+### Einrichten
+
+1. Server und Volume in der Hetzner Console anlegen, eigenen SSH-Schlüssel
+   hinterlegen, Volume mit „automatisch einhängen“.
+2. Schlüsselpaar nur für die GitHub Action erzeugen (lokal):
+   `ssh-keygen -t ed25519 -N '' -C github-deploy -f deploy_key`
+3. Auf dem Server als root:
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/rigorem/pass-ranking-motorcycle/main/deploy/setup-server.sh -o setup.sh
+   bash setup.sh --deploy-key "$(cat deploy_key.pub)"     # Inhalt von deploy_key.pub einsetzen
+   ```
+   Das Skript installiert Node 22, Redis und Caddy, richtet Firewall
+   (nur 22/80/443), automatische Sicherheitsupdates und den Dienst ein, holt
+   den Code nach `/srv/passeranking/app` und nennt am Ende die Adresse.
+   Ohne eigene Domain ist das `<ip-mit-strichen>.sslip.io` – ein freier Name,
+   der auf die IP zeigt; das HTTPS-Zertifikat holt Caddy selbst.
+4. Geheimnisse eintragen und neu starten:
+   ```sh
+   nano /etc/passeranking.env
+   systemctl restart passeranking
+   ```
    - `APP_PASSWORD` – das Passwort zum Bearbeiten
    - `GUEST_PASSWORD` – das Passwort für die Gastansicht (nur lesen)
+   - `SESSION_SECRET` (`openssl rand -hex 32`) – denselben Wert wie bisher
+     übernehmen, dann bleiben alle angemeldet
+   - `UPLOAD_TOKEN` – für den Foto-Import vom Handy (`openssl rand -hex 32`)
    - `MAPTILER_KEY` – für die Kartenbilder, kostenloser Schlüssel von
      [maptiler.com](https://www.maptiler.com/); ohne ihn bleiben die Kacheln
      leer. Das freie Kontingent genügt: gebraucht werden nur Rasterkacheln,
      nicht die kostenpflichtige Static-Maps-API
-   - optional `SESSION_SECRET` (`openssl rand -hex 32`)
-   - `UPLOAD_TOKEN` – für den Foto-Import vom Handy (`openssl rand -hex 32`)
    - optional `MAPTILER_STYLE`, voreingestellt `streets-v4`
    - optional `MATCH_RADIUS_M`, voreingestellt `3000`
 
-   Der Schlüssel wird nur auf dem Server benutzt und erreicht den Browser nie.
-   In den Schlüsseleinstellungen bei MapTiler bleiben die **Allowed HTTP
-   origins deshalb am besten leer**: eine Herkunftssperre schützt hier nichts.
-   Die App fragt jede Kachel einmal mit und einmal ohne Referer an, falls doch
-   eine gesetzt ist.
-4. Deployen.
-5. Pässe einspielen:
-   ```sh
-   vercel env pull .env.local
-   node --env-file=.env.local scripts/seed.mjs
-   ```
-   Der Lauf überspringt bereits vorhandene Pässe; `-- --force` überschreibt sie
-   (und wirft dabei Bewertungen weg).
+   Der MapTiler-Schlüssel wird nur auf dem Server benutzt und erreicht den
+   Browser nie. In den Schlüsseleinstellungen bei MapTiler bleiben die
+   **Allowed HTTP origins deshalb am besten leer**: eine Herkunftssperre
+   schützt hier nichts. Die App fragt jede Kachel einmal mit und einmal ohne
+   Referer an, falls doch eine gesetzt ist.
+5. Bei GitHub unter **Settings → Secrets and variables → Actions** anlegen:
+   `DEPLOY_HOST` (IP), `DEPLOY_KEY` (Inhalt von `deploy_key`),
+   `DEPLOY_HOST_KEY` (Ausgabe von `ssh-keyscan -t ed25519 <IP>`).
+   Danach die lokale Datei `deploy_key` löschen.
+
+Ein ganz neuer Server ohne alte Daten bekommt die sieben Pässe mit
+`cd /srv/passeranking/app && sudo -u passe node --env-file=/etc/passeranking.env scripts/seed.mjs`.
+
+### Ausrollen
+
+Jeder Push auf `main` löst `.github/workflows/deploy.yml` aus. Die Action
+meldet sich als `passe` an; der Schlüssel darf dort genau einen Befehl
+auslösen, `passeranking-deploy`. Der holt den Stand, installiert Pakete nur
+bei geändertem `package-lock.json`, startet den Dienst neu und meldet erst
+Erfolg, wenn die App antwortet. Von Hand: `sudo -u passe passeranking-deploy`.
+
+Welcher Zweig ausgerollt wird, steht in `/srv/passeranking/branch`.
+
+### Umzug von Vercel
+
+Einmalig, darf beliebig oft laufen – erst einmal, während die Seite noch auf
+Vercel läuft, dann ein kurzer letzter Lauf beim Umschalten:
+
+```sh
+cd /srv/passeranking/app
+sudo -u passe npm install --no-save @upstash/redis @vercel/blob
+sudo -u passe node --env-file=/etc/passeranking.env scripts/migrate-from-vercel.mjs
+```
+
+Dafür gehören die alten Zugänge (`UPSTASH_REDIS_REST_URL`,
+`UPSTASH_REDIS_REST_TOKEN`, `BLOB_READ_WRITE_TOKEN`) vorübergehend mit in
+`/etc/passeranking.env`. Das Skript übernimmt alle Schlüssel unverändert und
+lädt jede Datei unter demselben Pfad herunter, den Redis schon kennt – danach
+prüft es, ob jeder Foto- und Videoverweis eine Datei hat. Nach dem Umzug die
+drei Zugänge wieder löschen. Im Kurzbefehl die Adresse auf den neuen Namen
+umstellen.
+
+`vercel.json` schaltet das automatische Ausrollen bei Vercel ab: die alte
+Fassung bleibt dort unverändert erreichbar, bis das Projekt gelöscht wird.
+
+### Eigene Domain
+
+DNS-Eintrag (A, und AAAA für IPv6) auf die IP setzen, dann auf dem Server
+`bash setup.sh --host passe.example.de` erneut laufen lassen – oder
+`SITE_HOST` in `/etc/systemd/system/caddy.service.d/site.conf` ändern und
+`systemctl daemon-reload && systemctl restart caddy`.
+
+### Sichern
+
+Die automatischen Hetzner-Backups sichern die Systemplatte, **nicht das
+Volume**. Für Fotos, Videos und Redis deshalb zusätzlich den Ordner
+`/srv/passeranking/data` sichern, etwa nächtlich mit `restic` in eine Hetzner
+Storage Box. Redis schreibt seine Daten laufend nach `data/redis/`
+(`appendonly.aof`); für eine konsistente Kopie vorher `redis-cli BGSAVE`.
+
+### Nachsehen
+
+```sh
+systemctl status passeranking         # läuft die App?
+journalctl -u passeranking -f         # ihre Ausgaben
+tail -f /var/log/caddy/passeranking.log
+redis-cli INFO persistence            # aof_enabled:1
+```
 
 ## Lokal entwickeln
 
 ```sh
+brew install redis && brew services start redis
 npm install
-vercel env pull .env.local     # holt Redis- und Blob-Zugang aus dem Projekt
-vercel dev
+echo 'APP_PASSWORD=lokal' > .env
+npm run seed
+npm run dev                           # http://127.0.0.1:3000
 ```
 
-`vercel dev` liest `.env.local` selbst ein. Ohne Vercel-CLI lässt sich am
-Layout auch mit einem beliebigen statischen Server arbeiten – dann antwortet
-`/api` nicht, und die Seite bleibt hinter der Passwortabfrage stehen.
+Lokal liefert `server.mjs` auch die Seite selbst aus; Dateien landen unter
+`.data/`. Für die Kartenbilder `MAPTILER_KEY` mit in `.env` schreiben.
 
 ## Pass anlegen mit Vorschlägen
 
@@ -182,7 +284,7 @@ größte Stufe, auf der die ganze Passstraße noch ins Bild passt. Kennt die App
 den Verlauf nicht, zeigt sie den Pass auf Stufe 12 mit Markierung.
 
 Straßenverlauf und fertiges Bild werden pro Pass einmal geholt und landen dann
-im privaten Blob-Store, ausgeliefert wie die Fotos über eine Route mit
+als Datei auf dem Server, ausgeliefert wie die Fotos über eine Route mit
 Passwortprüfung. Danach kostet ein Aufruf nichts mehr bei fremden Diensten.
 Die Kachel wiegt rund 80 KB, die große Ansicht rund 260 KB.
 
@@ -281,7 +383,7 @@ Die Antwort ist kurz genug für eine Benachrichtigung am Handy:
 ```
 
 Dasselbe Foto zweimal zu schicken ist harmlos: über einen SHA-256 der Bytes
-(`photohash:<sha>`) wird die vorhandene Id zurückgegeben, kein zweites Blob.
+(`photohash:<sha>`) wird die vorhandene Id zurückgegeben, keine zweite Datei.
 
 Ohne iPhone lässt sich der Weg genauso prüfen:
 
@@ -294,7 +396,7 @@ curl -X POST https://<deine-domain>/api/import \
 
 ### Doppelte Fotos
 
-Dasselbe Bild ein zweites Mal hochzuladen legt kein zweites Blob mehr an: über
+Dasselbe Bild ein zweites Mal hochzuladen legt keine zweite Datei mehr an: über
 einen SHA-256 der Bytes (`photohash:<sha>` und zurück `photosha:<id>`) gibt der
 Server die vorhandene Id aus. Das gilt für beide Wege, Browser wie Import.
 
@@ -350,17 +452,17 @@ gezoomt und nicht gewischt.
 
 ## Videos
 
-Videos gehen einen anderen Weg als Fotos: mit 4,5 MB Rumpfgröße endet bei
-Vercel jede Funktion, ein Handyvideo ist ein Vielfaches davon. Der Browser holt
-sich deshalb über `/api/videos` (`step: 'token'`) einen **befristeten Schlüssel
-für genau einen Pfad, einen Medientyp und eine Höchstgröße**, lädt damit direkt
-in den Blob-Store und meldet das Ergebnis anschließend dort an
-(`step: 'register'`). Der
-eigentliche `BLOB_READ_WRITE_TOKEN` bleibt dabei auf dem Server, und
-`/api/videos` nimmt nur Pfade aus dem eigenen `videos/`-Ordner an.
+Videos werden nicht verkleinert und gehen deshalb über eine eigene Route:
+`POST /api/videos?passId=<id>` mit der Datei als Rumpf. Der Server schreibt
+sie direkt auf die Platte, statt sie im Speicher zu sammeln, und bricht ab,
+sobald mehr als 300 MB ankommen – angekündigte Übergröße lehnt er schon vor
+dem ersten Byte ab. Ohne `passId` landet das Video im Eingang. Der Browser
+lädt mit `XMLHttpRequest` hoch, weil nur das den Fortschritt meldet.
 
 Erlaubt sind MP4, QuickTime (was iPhones aufnehmen) und WebM, bis 300 MB.
-Ausgeliefert werden sie über dieselbe Route wie Fotos, also mit Sessionprüfung.
+Ausgeliefert werden sie über dieselbe Route wie Fotos, also mit Sessionprüfung,
+und mit Range-Anfragen: Safari auf dem iPhone spielt Videos nur ab, wenn der
+Server Teilstücke liefern kann.
 
 Dass eine Id zu einem Video gehört, steht in der Id selbst (`v-…`). Das ist
 bewusst schlicht gehalten: Pässe, Eingang und Löschen reichen Ids ohnehin nur
@@ -369,12 +471,6 @@ durch und bleiben dadurch unverändert, und der Browser weiß trotzdem, ob er ei
 
 Im Streifen steht ein Standbild mit Abspielzeichen (`preload="metadata"` holt
 nur das erste Bild, nicht den ganzen Film).
-
-`vendor/blob-client.js` ist der dafür nötige Browser-Client, gebündelt und
-mitversioniert – neu zu erzeugen mit `node scripts/vendor-blob-client.mjs`.
-Gebündelt deshalb, weil die Datei im Paket ein halbes Dutzend weiterer Pakete
-nachzieht; mitversioniert, damit auf Vercel kein Build-Schritt nötig ist und
-der Browser nichts von einem fremden CDN nachlädt.
 
 **Doppelte Videos** erkennt die Aufräumfunktion nicht: dafür müsste sie jedes
 einzelne herunterladen, und dafür ist die Laufzeit zu knapp. Sie zählt sie in

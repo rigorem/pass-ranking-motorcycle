@@ -1,6 +1,6 @@
 import { guard, guardWrite } from '../_lib/auth.js';
 import { patchPass, deletePass, redis, photoKey } from '../_lib/store.js';
-import { del as deleteBlob } from '@vercel/blob';
+import { deleteFile } from '../_lib/files.js';
 
 const NUM = new Set(['fun', 'amb', 'alt', 'lat', 'lon']);
 
@@ -9,7 +9,7 @@ async function dropMap(id) {
   try {
     for (const key of [`map:${id}:thumb`, `map:${id}:large`]) {
       const path = await redis.get(key);
-      if (path) await deleteBlob(String(path));
+      if (path) await deleteFile(String(path));
       await redis.del(key);
     }
     await redis.del('route:' + id);
@@ -53,11 +53,11 @@ export default async function handler(req, res) {
       const pass = await deletePass(id);
       if (!pass) return res.status(404).json({ error: 'not_found' });
       await dropMap(id);
-      // Die Fotos des Passes mit aufräumen, sonst bleiben sie für immer im Blob-Store.
+      // Die Fotos des Passes mit aufräumen, sonst bleiben sie für immer auf der Platte.
       for (const photoId of pass.photos || []) {
         try {
           const url = await redis.get(photoKey(photoId));
-          if (url) await deleteBlob(String(url));
+          if (url) await deleteFile(String(url));
           await redis.del(photoKey(photoId));
         } catch { /* ein verwaistes Foto ist kein Grund, das Löschen abzubrechen */ }
       }

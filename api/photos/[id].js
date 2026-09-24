@@ -1,6 +1,6 @@
 import { guard, guardWrite } from '../_lib/auth.js';
 import { redis, photoKey } from '../_lib/store.js';
-import { get as getBlob, del as deleteBlob } from '@vercel/blob';
+import { sendFile, deleteFile } from '../_lib/files.js';
 
 export default async function handler(req, res) {
   // Der Wächter steht bewusst auch vor GET: nur wer das Passwort kennt,
@@ -21,26 +21,23 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'not_found' });
   }
 
-  if (req.method === 'GET') {
-    try {
-      const found = await getBlob(String(path), { access: 'private' });
-      if (!found || found.statusCode !== 200) return res.status(502).json({ error: 'blob_unavailable' });
-      const body = Buffer.from(await new Response(found.stream).arrayBuffer());
-      res.setHeader('Content-Type', found.blob.contentType || 'image/jpeg');
-      res.setHeader('Content-Length', String(body.length));
-      // private: Fotos dürfen im Browser liegen, aber in keinem geteilten Cache.
-      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-      return res.status(200).end(body);
-    } catch (e) {
-      return res.status(502).json({ error: 'blob_unavailable' });
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    // Gestreamt und mit Range-Anfragen – Videos wären sonst ganz im Speicher,
+    // und Safari spielt sie ohne Teilstücke gar nicht erst ab.
+    // private: Fotos dürfen im Browser liegen, aber in keinem geteilten Cache.
+    const sent = await sendFile(req, res, String(path), { cacheControl: 'private, max-age=31536000, immutable' });
+    if (!sent) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ error: 'file_missing' });
     }
+    return;
   }
 
   if (req.method === 'DELETE') {
     res.setHeader('Cache-Control', 'no-store');
     if (!guardWrite(req, res)) return;
     try {
-      await deleteBlob(String(path));
+      await deleteFile(String(path));
       await redis.del(photoKey(id));
       return res.status(200).json({ deleted: id });
     } catch (e) {
@@ -48,6 +45,6 @@ export default async function handler(req, res) {
     }
   }
 
-  res.setHeader('Allow', 'GET, DELETE');
+  res.setHeader('Allow', 'GET, HEAD, DELETE');
   res.status(405).json({ error: 'method_not_allowed' });
 }

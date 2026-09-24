@@ -1,18 +1,18 @@
-// Ein Bild ablegen – der einzige Weg ins Blob. Sowohl der Upload aus dem
+// Ein Bild ablegen – der einzige Weg in den Dateispeicher. Sowohl der Upload aus dem
 // Browser als auch der Import vom Handy laufen hier durch, damit es nicht
 // zwei Wahrheiten darüber gibt, wo ein Foto liegt.
 
 import { redis, photoKey } from './store.js';
-import { put } from '@vercel/blob';
+import { putFile } from './files.js';
 import crypto from 'node:crypto';
 
-// Vercel deckelt den Request-Body bei 4,5 MB. Browser und Kurzbefehl rechnen
-// Bilder vorher auf 1800 px herunter, damit bleibt jedes Foto darunter.
+// Browser und Kurzbefehl rechnen Bilder vorher auf 1800 px herunter: spart
+// Platz und lädt am Berg schneller. Caddy lässt für Fotos höchstens 25 MB durch.
 export const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic']);
 
-// Videos gehen einen anderen Weg: sie sind zu groß für den Rumpf einer
-// Vercel-Funktion (4,5 MB) und wandern deshalb direkt aus dem Browser in den
-// Blob-Store. Siehe api/upload-token.js und api/videos.js.
+// Videos werden nicht verkleinert und gehen deshalb über eine eigene Route,
+// die sie direkt auf die Platte schreibt, statt sie im Speicher zu sammeln.
+// Siehe api/videos.js.
 export const VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
 export const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' };
 export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
@@ -30,7 +30,8 @@ const EXT = {
   'image/heic': 'heic'
 };
 
-// Vercel liefert den Body je nach Content-Type schon fertig geparst. Bei
+// server.mjs liefert den Body je nach Content-Type schon geparst (so wie es
+// früher Vercel tat). Bei
 // Binärdaten kann das ein Buffer sein – sonst den Stream selbst einsammeln.
 export async function readBody(req) {
   if (Buffer.isBuffer(req.body)) return req.body;
@@ -53,16 +54,11 @@ export function fingerprint(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-// Privater Store: das Blob ist ohne Token von außen gar nicht abrufbar. In
-// Redis liegt nur der Pfad, ausgeliefert wird über /api/photos/<id>, und das
-// prüft vorher die Session.
+// Die Datei ist von außen nicht erreichbar. In Redis liegt nur der Pfad,
+// ausgeliefert wird über /api/photos/<id>, und das prüft vorher die Session.
 export async function storePhoto(data, type, sha) {
   const id = crypto.randomUUID();
-  const blob = await put(`photos/${id}.${EXT[type] || 'jpg'}`, data, {
-    access: 'private',
-    addRandomSuffix: true,
-    contentType: type
-  });
+  const blob = await putFile(`photos/${id}.${EXT[type] || 'jpg'}`, data, { addRandomSuffix: true });
   await redis.set(photoKey(id), blob.pathname);
   // Beide Richtungen merken: die eine erkennt dasselbe Bild beim nächsten
   // Hochladen, die andere erspart dem Aufräumen das erneute Herunterladen.

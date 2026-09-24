@@ -1,0 +1,44 @@
+# Rollt jeden Stand von main auf den Hetzner-Server aus.
+#
+# Braucht drei Secrets im Repo (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST      IP des Servers
+#   DEPLOY_KEY       privater SSH-Schlüssel, dessen öffentliche Hälfte
+#                    setup-server.sh --deploy-key bei passe eingetragen hat
+#   DEPLOY_HOST_KEY  Zeile(n) aus `ssh-keyscan -t ed25519 <IP>` – so spricht
+#                    die Action nur mit genau diesem Server
+#
+# Der Schlüssel kann auf dem Server nichts außer passeranking-deploy
+# auslösen; welcher Zweig ausgerollt wird, entscheidet der Server selbst.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Auf den Server ausrollen
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_KEY" ] || [ -z "$DEPLOY_HOST_KEY" ]; then
+            echo "::notice::Deploy-Secrets fehlen noch – nichts ausgerollt."
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            passe@"$DEPLOY_HOST" deploy

@@ -1,0 +1,34 @@
+# Die App als Dienst. Liegt nach setup-server.sh unter
+# /etc/systemd/system/passeranking.service.
+
+[Unit]
+Description=Pässeranking
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=passe
+Group=passe
+WorkingDirectory=/srv/passeranking/app
+EnvironmentFile=/etc/passeranking.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.mjs
+Restart=always
+RestartSec=2
+
+# Die App darf nur in ihren Datenordner schreiben, sonst nirgends.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/srv/passeranking/data
+
+[Install]
+WantedBy=multi-user.target

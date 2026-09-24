@@ -2,7 +2,7 @@ import { guard } from '../_lib/auth.js';
 import { getPass, patchPass, redis } from '../_lib/store.js';
 import { routeFor, encodePolyline, decodePolyline } from '../_lib/route.js';
 import { renderMap } from '../_lib/tilemap.js';
-import { put, get as getBlob, del as deleteBlob } from '@vercel/blob';
+import { putFile, sendFile, deleteFile } from '../_lib/files.js';
 
 // Das Kartenbild eines Passes: die Passstraße mit ihren Kehren, aus
 // OpenStreetMap geholt und über eine Karte gelegt. Beides – Straßenverlauf und
@@ -24,15 +24,8 @@ const SIZES = {
 const blobKey = (id, size) => `map:${id}:${size}`;
 const routeKey = id => 'route:' + id;
 
-async function send(res, path) {
-  const found = await getBlob(String(path), { access: 'private' });
-  if (!found || found.statusCode !== 200) return false;
-  const body = Buffer.from(await new Response(found.stream).arrayBuffer());
-  res.setHeader('Content-Type', found.blob.contentType || 'image/svg+xml');
-  res.setHeader('Content-Length', String(body.length));
-  res.setHeader('Cache-Control', 'private, max-age=604800');
-  res.status(200).end(body);
-  return true;
+function send(req, res, path) {
+  return sendFile(req, res, String(path), { cacheControl: 'private, max-age=604800' });
 }
 
 // Den Straßenverlauf einmal besorgen. `settled` sagt, ob das Ergebnis
@@ -96,13 +89,13 @@ export default async function handler(req, res) {
   if (refresh) {
     try {
       const old = await redis.get(blobKey(id, size));
-      if (old) await deleteBlob(String(old));
+      if (old) await deleteFile(String(old));
       await redis.del(blobKey(id, size));
     } catch { /* dann wird es eben überschrieben */ }
   } else {
     try {
       const cached = await redis.get(blobKey(id, size));
-      if (cached && await send(res, cached)) return;
+      if (cached && await send(req, res, cached)) return;
     } catch { /* weiter, dann eben neu rendern */ }
   }
 
@@ -148,9 +141,7 @@ export default async function handler(req, res) {
   // ohne Straßenverlauf würde sonst für immer hängenbleiben.
   if (settled && !(enc && !String(used).startsWith('route'))) {
     try {
-      const blob = await put(`maps/${id}-${size}.svg`, data, {
-        access: 'private', addRandomSuffix: true, contentType: 'image/svg+xml', allowOverwrite: true
-      });
+      const blob = await putFile(`maps/${id}-${size}.svg`, data, { addRandomSuffix: true });
       await redis.set(blobKey(id, size), blob.pathname);
     } catch { /* dann eben beim nächsten Mal wieder rendern */ }
   } else {

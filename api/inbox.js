@@ -2,7 +2,7 @@ import { guardWrite } from './_lib/auth.js';
 import { redis, listPasses, appendPhotos, photoKey } from './_lib/store.js';
 import { listInbox, dropInbox, bumpInboxRev } from './_lib/inbox.js';
 import { nearestPass } from './import.js';
-import { del as deleteBlob } from '@vercel/blob';
+import { deleteFile } from './_lib/files.js';
 
 // Der Eingang: was der Kurzbefehl nicht sicher zuordnen konnte. Ein Bearbeiter
 // räumt ihn mit einem Griff auf; im Normalfall ist er leer.
@@ -40,12 +40,12 @@ export default async function handler(req, res) {
     try {
       if (body.discard) {
         for (const id of ids) {
-          // Genau wie DELETE /api/photos/<id>: erst das Blob, dann der Verweis.
+          // Genau wie DELETE /api/photos/<id>: erst die Datei, dann der Verweis.
           try {
             const path = await redis.get(photoKey(id));
-            if (path) await deleteBlob(String(path));
+            if (path) await deleteFile(String(path));
             await redis.del(photoKey(id));
-          } catch { /* ein übrig gebliebenes Blob ist kein Grund abzubrechen */ }
+          } catch { /* eine übrig gebliebene Datei ist kein Grund abzubrechen */ }
         }
         await dropInbox(ids);
         await bumpInboxRev();

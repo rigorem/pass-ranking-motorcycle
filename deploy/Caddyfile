@@ -1,0 +1,57 @@
+# Caddy vor dem Pässeranking. setup-server.sh kopiert diese Datei nach
+# /etc/caddy/Caddyfile und setzt SITE_HOST (z. B. 49-12-34-56.sslip.io) in
+# /etc/systemd/system/caddy.service.d/site.conf. Für eine eigene Domain:
+#   bash setup.sh --host passe.example.de
+# oder SITE_HOST dort von Hand ändern, dann systemctl daemon-reload &&
+# systemctl restart caddy – das Zertifikat holt Caddy selbst.
+
+{$SITE_HOST} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Die App. Fotos werden im Browser verkleinert, Videos nicht.
+	handle /api/* {
+		@videos path /api/videos
+		request_body @videos {
+			max_size 310MB
+		}
+		@rest not path /api/videos
+		request_body @rest {
+			max_size 25MB
+		}
+		# Die Anmeldung bremst Rateversuche pro IP und liest dafür den ersten
+		# Eintrag von X-Forwarded-For. Caddy ersetzt einen vom Browser
+		# mitgeschickten Kopf durch die echte Adresse, solange keine
+		# trusted_proxies eingetragen sind – deshalb hier nie welche eintragen,
+		# sonst ließe sich die Bremse mit einem ausgedachten Kopf umgehen.
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Die Seite selbst. Nur was hier steht, ist öffentlich – alles andere im
+	# App-Ordner (Quelltext der API, Skripte, .git, node_modules) bleibt zu.
+	@public path / /index.html /styles.css /app.js /exif.js /data/passes-alps.json /img/*
+	handle @public {
+		root * /srv/passeranking/app
+		@page path / /index.html
+		header @page Cache-Control no-store
+		file_server
+	}
+
+	handle {
+		respond 404
+	}
+
+	log {
+		output file /var/log/caddy/passeranking.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

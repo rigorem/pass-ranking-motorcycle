@@ -5,11 +5,14 @@
   "type": "module",
   "description": "Pässeranking Dolomiten – Motorradpässe nach Fahrspaß und Ambiente",
   "scripts": {
-    "dev": "vercel dev",
-    "seed": "node scripts/seed.mjs"
+    "dev": "node --env-file-if-exists=.env server.mjs",
+    "start": "node server.mjs",
+    "seed": "node --env-file-if-exists=.env scripts/seed.mjs"
   },
   "dependencies": {
-    "@upstash/redis": "^1.39.0",
-    "@vercel/blob": "^2.8.0"
+    "redis": "^6.2.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
