@@ -61,7 +61,7 @@ const api = {
   login: password => req('/api/auth', { method: 'POST', body: { password } }),
   logout: () => req('/api/auth', { method: 'DELETE' }),
   list: () => req('/api/passes'),
-  version: () => req('/api/version'),
+  version: () => req('/api/session?poll=1'),
   inbox: () => req('/api/inbox').then(d => d.items || []),
   assign: (photoIds, passId) => req('/api/inbox', { method: 'POST', body: { photoIds, passId } }),
   discard: photoIds => req('/api/inbox', { method: 'POST', body: { photoIds, discard: true } }),
@@ -70,8 +70,8 @@ const api = {
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
   upload: blob => req('/api/photos', { method: 'POST', body: blob }).then(d => d.id),
-  uploadToken: (contentType, size) => req('/api/upload-token', { method: 'POST', body: { contentType, size } }),
-  registerVideo: data => req('/api/videos', { method: 'POST', body: data }),
+  uploadToken: (contentType, size) => req('/api/videos', { method: 'POST', body: { step: 'token', contentType, size } }),
+  registerVideo: data => req('/api/videos', { method: 'POST', body: { step: 'register', ...data } }),
   // Der Weg mit Ortsangabe: der Server sucht sich den Pass selbst.
   importPhoto: (blob, meta) => req('/api/import', {
     method: 'POST',
@@ -1299,7 +1299,7 @@ $('#inboxList').addEventListener('click', async e => {
 
 /* ----------------------------------------------------- Live-Abgleich --- */
 
-// Zu zweit unterwegs: /api/version ist eine winzige Zahl, die bei jeder
+// Zu zweit unterwegs: /api/session?poll=1 ist eine winzige Zahl, die bei jeder
 // Änderung hochgeht. Nur wenn sie sich bewegt hat, wird die Liste geholt.
 // Solange gemeinsam bewertet wird, alle 3 Sekunden; danach zieht sich der
 // Takt zurück, damit ein vergessener Tab nicht stundenlang pollt.

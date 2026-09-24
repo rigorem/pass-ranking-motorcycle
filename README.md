@@ -13,11 +13,11 @@ index.html             Markup
 styles.css             Gestaltung, hell und dunkel
 app.js                 Frontend – spricht nur mit /api
 api/
-  session.js           GET  – bin ich angemeldet?
+  session.js           GET  – bin ich angemeldet? (?poll=1: Änderungszähler)
   auth.js              POST – anmelden, DELETE – abmelden
-  version.js           GET  – Änderungszähler für den Live-Abgleich
   place.js             GET  – Koordinate -> Gegend (Nominatim, gecacht)
   import.js            POST – Foto vom Handy, ordnet nach Koordinaten zu
+  videos.js            POST – Schlüssel fürs Hochladen und Eintrag danach
   inbox.js             GET/POST – Fotos ohne sichere Zuordnung
   _lib/photos.js       Ablegen im Blob, gemeinsam für Upload und Import
   _lib/inbox.js        Der Eingang
@@ -352,9 +352,10 @@ gezoomt und nicht gewischt.
 
 Videos gehen einen anderen Weg als Fotos: mit 4,5 MB Rumpfgröße endet bei
 Vercel jede Funktion, ein Handyvideo ist ein Vielfaches davon. Der Browser holt
-sich deshalb von `/api/upload-token` einen **befristeten Schlüssel für genau
-einen Pfad, einen Medientyp und eine Höchstgröße**, lädt damit direkt in den
-Blob-Store und meldet das Ergebnis anschließend über `/api/videos` an. Der
+sich deshalb über `/api/videos` (`step: 'token'`) einen **befristeten Schlüssel
+für genau einen Pfad, einen Medientyp und eine Höchstgröße**, lädt damit direkt
+in den Blob-Store und meldet das Ergebnis anschließend dort an
+(`step: 'register'`). Der
 eigentliche `BLOB_READ_WRITE_TOKEN` bleibt dabei auf dem Server, und
 `/api/videos` nimmt nur Pfade aus dem eigenen `videos/`-Ordner an.
 
@@ -382,7 +383,7 @@ der Antwort mit und lässt sie in Ruhe.
 ## Gemeinsam bewerten
 
 Jede Änderung zählt serverseitig `passes:rev` hoch. Die Browser fragen nur
-diese Zahl ab (`/api/version`) und holen die Liste erst, wenn sie sich bewegt
+diese Zahl ab (`/api/session?poll=1`) und holen die Liste erst, wenn sie sich bewegt
 hat. Wer gerade mitbewertet, sieht die Bewertung des anderen also nach
 spätestens drei Sekunden, und der geänderte Pass leuchtet kurz auf.
 
