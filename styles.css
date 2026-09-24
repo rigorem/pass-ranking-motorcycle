@@ -41,7 +41,9 @@
     --shadow-lg:0 12px 40px rgba(0,0,0,.6);
   }
 }
+:root[data-theme="light"]{color-scheme:light}
 :root[data-theme="dark"]{
+  color-scheme:dark;
   --bg:#000000; --surface:#1C1C1E; --surface-2:#2C2C2E;
   --fill:rgba(120,120,128,.24); --fill-2:rgba(120,120,128,.36);
   --sep:rgba(84,84,88,.6);
@@ -77,12 +79,39 @@ body.locked .bar,body.locked .count,body.locked .list,body.locked .actions,body.
 
 /* ------------------------------------------------------------ Kopf --- */
 
-.hero{padding:28px 4px 16px}
-.eyebrow{margin:0 0 2px;font-size:.8125rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-2)}
+.hero{padding:20px 4px 16px}
+.hero-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.eyebrow{margin:0;font-size:.8125rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-2)}
 .hero h1{
   margin:0;font-size:clamp(2.125rem,7vw,3rem);font-weight:800;line-height:1.05;letter-spacing:-.028em;
 }
 .hero p#intro{margin:8px 0 0;color:var(--ink-2);font-size:1rem;line-height:1.45;max-width:40ch;letter-spacing:-.005em}
+
+/* Umschalter hell / dunkel / automatisch */
+.theme-ctl{
+  position:relative;display:grid;grid-template-columns:repeat(3,1fr);
+  padding:2px;border-radius:999px;background:var(--fill);
+}
+.theme-thumb{
+  position:absolute;top:2px;bottom:2px;left:2px;width:calc((100% - 4px) / 3);border-radius:999px;
+  background:var(--surface);box-shadow:0 2px 6px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.04);
+  transition:transform 320ms var(--ease-drawer);
+}
+.theme-ctl button{
+  position:relative;z-index:1;display:grid;place-items:center;width:36px;height:30px;
+  border:0;padding:0;background:none;border-radius:999px;color:var(--ink-2);
+  transition:color 160ms ease,transform 120ms var(--ease-out);
+}
+.theme-ctl button[aria-pressed="true"]{color:var(--ink)}
+.theme-ctl button:active{transform:scale(.92)}
+.theme-ctl svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.theme-ctl svg .fill,.theme-ctl [data-theme-set="dark"] svg path{fill:currentColor;stroke:none}
+.theme-ctl [data-theme-set="dark"] svg path{fill:currentColor}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-thumb{background:#636366}}
+:root[data-theme="dark"] .theme-thumb{background:#636366}
+
+/* Beim Umschalten weich überblenden statt hart von Schwarz auf Weiß */
+::view-transition-old(root),::view-transition-new(root){animation-duration:320ms;animation-timing-function:ease}
 
 /* Segmentsteuerung in einer durchscheinenden Leiste, die oben stehen bleibt.
    Ein Rand erscheint erst, wenn Inhalt darunter liegt. */
@@ -231,7 +260,7 @@ a.cover:active{transform:scale(.95)}
 .note{
   display:block;margin-top:12px;width:100%;min-height:2.75em;resize:vertical;
   border:0;border-radius:var(--r-sm);background:var(--fill);padding:.6rem .75rem;
-  font-size:.9375rem;line-height:1.4;
+  font-size:1rem;line-height:1.4;
   transition:background-color 160ms ease,box-shadow 160ms ease;
 }
 .note::placeholder{color:var(--ink-3)}
@@ -305,7 +334,7 @@ body.guest .dots button:active{transform:none}
 .inbox-near{display:block;font-size:.8125rem;color:var(--ink-2)}
 .inbox-row select{
   border:0;border-radius:var(--r-sm);background:var(--fill);
-  padding:.5rem .6rem;font-size:.9375rem;max-width:100%;
+  padding:.5rem .6rem;font-size:1rem;max-width:100%;
 }
 .inbox-act{display:flex;gap:8px}
 .inbox-act .btn{padding:.45rem .9rem;font-size:.9375rem}
@@ -504,9 +533,51 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
   transition:opacity 260ms var(--ease-out),transform 380ms var(--ease-drawer);
 }
 
+/* --------------------------------------------------- Rechner-Maße --- */
+
+/* MacBook Pro 14" (1512 px): zwei Spalten statt einer schmalen Bahn. */
+@media (min-width:1024px){
+  .wrap{max-width:1160px;padding:16px 32px 96px}
+  .hero{padding:36px 4px 20px}
+  .hero h1{font-size:3.5rem}
+  .hero p#intro{font-size:1.0625rem;max-width:52ch}
+  .bar{margin:0 -32px;padding-left:32px;padding-right:32px}
+  .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+  .list > .empty,.list > .notice{grid-column:1/-1}
+  .inbox,.guest-hint{max-width:none}
+  .actions{max-width:560px;margin-left:auto;margin-right:auto;margin-top:32px}
+  .pass{padding:18px 20px 14px}
+  .photos{margin-left:-20px;margin-right:-20px;padding:0 20px 2px;scroll-padding:0 20px}
+}
+
+/* Maus und Trackpad: sichtbare Hover-Zustände, nur dort */
+@media (hover:hover) and (pointer:fine){
+  .link:hover{opacity:.7}
+  .action:hover{background:var(--fill)}
+  .text-btn:hover{opacity:.7}
+  .btn:hover{filter:brightness(1.08)}
+  .btn-row:hover{background:var(--fill)}
+  .seg-ctl button:not([aria-pressed="true"]):hover,.theme-ctl button:not([aria-pressed="true"]):hover{color:var(--ink);opacity:.75}
+  a.cover:hover img,.photos img:hover{filter:brightness(1.06)}
+  .add-photo:hover{background:var(--fill-2)}
+}
+
 /* ------------------------------------------------------ Handy-Maße --- */
 
+/* Finger statt Mauszeiger: alles Antippbare mindestens 44 px hoch */
+@media (pointer:coarse){
+  .link{min-height:44px;padding:0 10px}
+  .seg-ctl button{padding:9px 8px}
+  .theme-ctl button{width:40px;height:34px}
+  .text-btn{min-height:44px}
+}
+
+/* iPhone 16 Pro (402 px) und ähnliche: Ränder für Dynamic Island und
+   Home-Indikator kommen aus env(), im Querformat auch seitlich. */
+
 @media (max-width:480px){
+  .hero{padding-top:12px}
+  .hero h1{font-size:2.25rem}
   .pass{padding:14px 14px 12px;border-radius:20px}
   .head{grid-template-columns:auto 56px 1fr;gap:10px}
   .rank{font-size:1.375rem}
@@ -527,7 +598,7 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:1ms !important;animation-delay:0ms !important}
-  .seg-thumb,.dots button,.btn,.cover,.photos img,.add-photo,.glass-btn{transition:none}
+  .seg-thumb,.theme-thumb,.dots button,.btn,.cover,.photos img,.add-photo,.glass-btn{transition:none}
   dialog,dialog.sheet{transform:none !important;transition:opacity 180ms ease,overlay 180ms allow-discrete,display 180ms allow-discrete !important}
   .toast,.toast.show{transform:translate(-50%,0);transition:opacity 180ms ease}
 }

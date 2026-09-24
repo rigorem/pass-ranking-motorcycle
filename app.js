@@ -253,7 +253,10 @@ const ICON_ROUTE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c-
 // laufenden Bewegung; eine neue setzt also dort an, wo die alte gerade ist.
 function positions() {
   const out = new Map();
-  for (const li of list.querySelectorAll('.pass')) out.set(li.dataset.id, li.getBoundingClientRect().top);
+  for (const li of list.querySelectorAll('.pass')) {
+    const r = li.getBoundingClientRect();
+    out.set(li.dataset.id, { x: r.left, y: r.top });
+  }
   return out;
 }
 
@@ -275,9 +278,11 @@ function glide(before) {
   for (const li of list.querySelectorAll('.pass')) {
     const was = before.get(li.dataset.id);
     if (was === undefined) continue;
-    const dy = was - li.getBoundingClientRect().top;
-    if (Math.abs(dy) < 1) continue;
-    const frames = [{ transform: `translateY(${dy}px)` }, { transform: 'none' }];
+    // Am Rechner stehen die Karten in zwei Spalten, also auch seitwärts.
+    const now = li.getBoundingClientRect();
+    const dx = was.x - now.left, dy = was.y - now.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    const frames = [{ transform: `translate(${dx}px,${dy}px)` }, { transform: 'none' }];
     try { li.animate(frames, SPRING); }
     catch { li.animate(frames, { duration: 450, easing: 'cubic-bezier(.32,.72,0,1)' }); }
   }
@@ -407,6 +412,41 @@ document.querySelectorAll('.seg-ctl button').forEach((b, i) => b.addEventListene
   $('.seg-thumb').style.transform = `translateX(${i * 100}%)`;
   render();
 }));
+
+/* -------------------------------------------------------- Darstellung --- */
+
+// Hell, dunkel oder wie das Gerät. Die Wahl gilt nur für dieses Gerät und
+// wird schon im <head> gesetzt, bevor die Seite zum ersten Mal zeichnet.
+const THEMES = ['auto', 'light', 'dark'];
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+
+function savedTheme() {
+  try { const t = localStorage.getItem('theme'); return THEMES.includes(t) ? t : 'auto'; } catch { return 'auto'; }
+}
+
+function showTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'auto') delete root.dataset.theme; else root.dataset.theme = theme;
+  const i = THEMES.indexOf(theme);
+  document.querySelectorAll('[data-theme-set]').forEach(b => b.setAttribute('aria-pressed', b.dataset.themeSet === theme));
+  $('.theme-thumb').style.transform = `translateX(${i * 100}%)`;
+  // Die Browserleiste auf dem Handy passt sich mit an.
+  const dark = theme === 'dark' || (theme === 'auto' && darkQuery.matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => {
+    if (theme === 'auto') m.content = m.media.includes('dark') ? '#000000' : '#F2F2F7';
+    else m.content = dark ? '#000000' : '#F2F2F7';
+  });
+}
+
+document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('click', () => {
+  const theme = b.dataset.themeSet;
+  if (theme === savedTheme()) return;
+  try { if (theme === 'auto') localStorage.removeItem('theme'); else localStorage.setItem('theme', theme); } catch { /* dann eben nur bis zum Neuladen */ }
+  // Ein harter Wechsel von Schwarz auf Weiß blendet; also kurz überblenden.
+  if (document.startViewTransition && !reduceMotion.matches) document.startViewTransition(() => showTheme(theme));
+  else showTheme(theme);
+}));
+showTheme(savedTheme());
 
 // Die Leiste bekommt ihr Milchglas erst, wenn Inhalt darunter durchläuft.
 new IntersectionObserver(([e]) => $('#bar').classList.toggle('stuck', !e.isIntersecting))
