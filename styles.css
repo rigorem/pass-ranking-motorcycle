@@ -29,6 +29,10 @@
   --ease-drawer:cubic-bezier(.32,.72,0,1);
 
   --r-card:22px; --r-md:14px; --r-sm:10px;
+
+  /* Hintergrundfoto und die Glasflächen darüber */
+  --photo-opacity:.5;
+  --glass:rgba(255,255,255,.78);
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -42,6 +46,8 @@
     --scrim:rgba(0,0,0,.55);
     --shadow:none;
     --shadow-lg:0 12px 40px rgba(0,0,0,.6);
+    --photo-opacity:.42;
+    --glass:rgba(28,28,30,.74);
   }
 }
 :root[data-theme="light"]{color-scheme:light}
@@ -57,6 +63,8 @@
   --scrim:rgba(0,0,0,.55);
   --shadow:none;
   --shadow-lg:0 12px 40px rgba(0,0,0,.6);
+  --photo-opacity:.42;
+  --glass:rgba(28,28,30,.74);
 }
 
 *,*::before,*::after{box-sizing:border-box}
@@ -69,6 +77,21 @@ body{
   padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
 }
 button,input,textarea,select{font:inherit;color:inherit;letter-spacing:inherit}
+
+/* Hintergrund: eigene Fotos, stark zurückgenommen – quer am Rechner, hochkant
+   am Handy. Die Ebene steht fest, der Inhalt läuft darüber; nach unten wird
+   sie blasser, damit die Karten lesbar bleiben. Geladen wird nur das Bild,
+   dessen Regel greift. */
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:url(/img/bg-landscape.jpg) center 62% / cover no-repeat;
+  opacity:var(--photo-opacity);
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 35%,rgba(0,0,0,.45) 100%);
+          mask-image:linear-gradient(to bottom,#000 0%,#000 35%,rgba(0,0,0,.45) 100%);
+}
+@media (orientation:portrait){
+  body::before{background-image:url(/img/bg-portrait.jpg);background-position:center 30%}
+}
 button{cursor:pointer;-webkit-user-select:none;user-select:none}
 :focus-visible{outline:3px solid color-mix(in srgb,var(--tint) 60%,transparent);outline-offset:2px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -88,7 +111,9 @@ body.locked .count,body.locked .list,body.locked .actions,body.locked .page-foot
 .hero h1{
   margin:0;font-size:clamp(2.125rem,7vw,3rem);font-weight:800;line-height:1.05;letter-spacing:-.028em;
 }
-.hero p#intro{margin:8px 0 0;color:var(--ink-2);font-size:1rem;line-height:1.45;max-width:40ch;letter-spacing:-.005em}
+/* Text direkt über dem Foto: kräftiger und dunkler als sonst, damit er auf
+   Fels und Wald genauso lesbar bleibt wie auf Himmel. */
+.hero p#intro{margin:8px 0 0;color:color-mix(in srgb,var(--ink) 78%,transparent);font-size:1rem;font-weight:500;line-height:1.45;max-width:40ch;letter-spacing:0}
 
 /* Umschalter hell / dunkel / automatisch */
 .theme-ctl{
@@ -116,7 +141,7 @@ body.locked .count,body.locked .list,body.locked .actions,body.locked .page-foot
 /* Beim Umschalten weich überblenden statt hart von Schwarz auf Weiß */
 ::view-transition-old(root),::view-transition-new(root){animation-duration:320ms;animation-timing-function:ease}
 
-.count{margin:0 4px 14px;font-size:.8125rem;color:var(--ink-2)}
+.count{margin:0 4px 14px;font-size:.8125rem;font-weight:600;color:color-mix(in srgb,var(--ink) 70%,transparent)}
 
 /* ---------------------------------------------------------- Karten --- */
 
@@ -261,6 +286,12 @@ body.guest .note{background:transparent;padding-left:0;padding-right:0;min-heigh
 .empty,.notice{
   background:var(--surface);border-radius:var(--r-card);padding:28px 20px;
   color:var(--ink-2);text-align:center;box-shadow:var(--shadow);
+}
+
+/* Karten als Milchglas über dem Hintergrundfoto */
+body :is(.pass,.inbox,.actions,.guest-hint,.empty,.notice){
+  background:var(--glass);
+  -webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%);
 }
 
 /* ---------------------------------------------- Aktionen am Ende --- */
@@ -575,6 +606,8 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
   .toast,.toast.show{transform:translate(-50%,0);transition:opacity 180ms ease}
 }
 @media (prefers-reduced-transparency:reduce){
+  body::before{display:none}
+  body :is(.pass,.inbox,.actions,.guest-hint,.empty,.notice){-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
   .toast,#suggest,.glass-btn{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
   .glass-btn{background:#333}
   dialog.gate::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--bg)}
