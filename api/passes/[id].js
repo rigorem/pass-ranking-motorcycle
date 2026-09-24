@@ -31,7 +31,8 @@ export default async function handler(req, res) {
     for (const [k, v] of Object.entries(body)) {
       if (TEXT.has(k)) patch[k] = String(v ?? '').trim();
       else if (NUM.has(k)) patch[k] = v === null || v === '' ? null : Number(v);
-      else if (k === 'photos' && Array.isArray(v)) patch[k] = v.map(String);
+      // Dieselbe Id zweimal in einer Liste ist immer ein Versehen.
+      else if (k === 'photos' && Array.isArray(v)) patch[k] = [...new Set(v.map(String))];
       else if (k === 'order') patch[k] = Number(v) || 0;
     }
     if ('de' in patch && !patch.de) return res.status(400).json({ error: 'name_required' });

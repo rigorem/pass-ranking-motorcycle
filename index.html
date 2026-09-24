@@ -67,6 +67,7 @@
     </button>
   </div>
   <div class="page-foot">
+    <button class="link" id="dedupe" hidden>Doppelte Fotos suchen</button>
     <button class="link" id="logout" hidden>Abmelden</button>
   </div>
 </div>
@@ -111,7 +112,14 @@
 </dialog>
 
 <dialog id="lightbox">
-  <img id="lbImg" alt="">
+  <div class="lb-stage">
+    <img id="lbImg" alt="">
+    <button class="lb-nav prev" id="lbPrev" aria-label="Vorheriges Foto" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="lb-nav next" id="lbNext" aria-label="Nächstes Foto" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+    <span class="lb-count" id="lbCount" hidden></span>
+  </div>
   <div class="lb-bar">
     <button class="glass-btn" id="lbDel" hidden>Entfernen</button>
     <span style="flex:1"></span>

@@ -16,7 +16,9 @@ let sortKey = 'total';
 let pendingRender = false;
 let uploadFor = null;
 let editId = null;
-let lb = null;
+let lb = null;          // {pass, id} des gezeigten Fotos
+let lbList = [];        // alle Fotos des Passes, zum Blättern
+let lbIndex = -1;
 let authed = false;
 let canWrite = true;    // Gastansicht: alles sichtbar, nichts veränderbar
 let inboxCount = 0;     // Fotos, die noch keinem Pass gehören
@@ -56,6 +58,7 @@ const api = {
   inbox: () => req('/api/inbox').then(d => d.items || []),
   assign: (photoIds, passId) => req('/api/inbox', { method: 'POST', body: { photoIds, passId } }),
   discard: photoIds => req('/api/inbox', { method: 'POST', body: { photoIds, discard: true } }),
+  dedupe: apply => req('/api/dedupe', { method: 'POST', body: { apply } }),
   create: data => req('/api/passes', { method: 'POST', body: data }).then(d => d.pass),
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
@@ -84,6 +87,7 @@ function message(err) {
     case 'not_found': return 'Dieser Pass existiert nicht mehr.';
     case 'upload_not_configured': return 'Der Foto-Import ist noch nicht eingerichtet.';
     case 'pass_id_required': return 'Bitte erst einen Pass auswählen.';
+    case 'dedupe_failed': return 'Die Suche nach Doppeln ist fehlgeschlagen.';
     case 'unsupported_type': return 'Dieses Bildformat geht nicht.';
     default: return 'Speichern fehlgeschlagen. Bitte nochmal versuchen.';
   }
@@ -473,12 +477,7 @@ list.addEventListener('click', e => {
   } else if (t.dataset.edit) {
     openEdit(t.dataset.edit);
   } else if (t.dataset.photo) {
-    lb = { pass: t.dataset.pass, id: t.dataset.photo };
-    const img = t.tagName === 'IMG' ? t : t.querySelector('img');
-    $('#lbImg').src = img ? img.src : '/api/photos/' + encodeURIComponent(t.dataset.photo);
-    $('#lbImg').alt = img ? img.alt : '';
-    $('#lbDel').hidden = !canWrite;
-    $('#lightbox').showModal();
+    openLightbox(t.dataset.pass, t.dataset.photo);
   }
 });
 
@@ -545,9 +544,14 @@ $('#lbDel').onclick = async () => {
   if (!lb || !confirm('Dieses Foto entfernen?')) return;
   const p = passes.find(x => x.id === lb.pass);
   const id = lb.id;
-  $('#lightbox').close();
   if (!p) return;
+
   write(p.id, { photos: (p.photos || []).filter(x => x !== id) });
+  lbList = lbList.filter(x => x !== id);
+  // Sind noch Fotos da, gleich das nächste zeigen, statt zu schließen.
+  if (lbList.length) showLb(Math.min(lbIndex, lbList.length - 1));
+  else $('#lightbox').close();
+
   try { await api.removePhoto(id); } catch { /* Verweis ist weg, das Blob räumt der nächste Lauf */ }
   toast('Foto entfernt');
 };
@@ -728,6 +732,79 @@ function openMap(p) {
 
 $('#mapClose').onclick = () => $('#mapDlg').close();
 $('#mapDlg').addEventListener('click', e => { if (e.target.id === 'mapDlg') $('#mapDlg').close(); });
+
+/* --------------------------------------------------------- Lightbox --- */
+
+// Beim Öffnen die ganze Fotoreihe des Passes mitnehmen, damit sich blättern
+// lässt, ohne jedes Mal zu schließen.
+function openLightbox(passId, photoId) {
+  const p = passes.find(x => x.id === passId);
+  lbList = p ? [...(p.photos || [])] : [photoId];
+  lbIndex = Math.max(0, lbList.indexOf(photoId));
+  lb = { pass: passId, id: photoId };
+  showLb(lbIndex);
+  $('#lbDel').hidden = !canWrite;
+  $('#lightbox').showModal();
+}
+
+// Ein einzelnes Foto ohne Reihe – aus dem Eingang.
+function openSingle(src, alt) {
+  lb = null; lbList = []; lbIndex = -1;
+  $('#lbImg').src = src;
+  $('#lbImg').alt = alt || '';
+  $('#lbDel').hidden = true;
+  updateLbNav();
+  $('#lightbox').showModal();
+}
+
+function showLb(i) {
+  if (!lbList.length) return;
+  lbIndex = (i + lbList.length) % lbList.length;
+  const id = lbList[lbIndex];
+  if (lb) lb.id = id;
+  $('#lbImg').src = '/api/photos/' + encodeURIComponent(id);
+  $('#lbImg').alt = 'Foto';
+  updateLbNav();
+}
+
+function updateLbNav() {
+  const many = lbList.length > 1;
+  $('#lbPrev').hidden = !many;
+  $('#lbNext').hidden = !many;
+  $('#lbCount').hidden = !many;
+  if (many) $('#lbCount').textContent = `${lbIndex + 1} / ${lbList.length}`;
+}
+
+$('#lbPrev').onclick = e => { e.stopPropagation(); showLb(lbIndex - 1); };
+$('#lbNext').onclick = e => { e.stopPropagation(); showLb(lbIndex + 1); };
+
+// Tastatur am Rechner, Wischen am Handy.
+$('#lightbox').addEventListener('keydown', e => {
+  if (!lbList.length) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); showLb(lbIndex - 1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); showLb(lbIndex + 1); }
+});
+
+let swipeX = 0, swipeY = 0, swiping = false;
+const stage = document.querySelector('.lb-stage');
+
+stage.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) { swiping = false; return; }
+  swipeX = e.touches[0].clientX;
+  swipeY = e.touches[0].clientY;
+  swiping = true;
+}, { passive: true });
+
+stage.addEventListener('touchend', e => {
+  if (!swiping || lbList.length < 2) { swiping = false; return; }
+  swiping = false;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - swipeX;
+  const dy = t.clientY - swipeY;
+  // Waagerecht und weit genug: sonst war es Scrollen oder ein Tippen.
+  if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy)) return;
+  showLb(lbIndex + (dx < 0 ? 1 : -1));
+}, { passive: true });
 
 /* ------------------------------------------------------- Pass-Dialog --- */
 
@@ -965,11 +1042,7 @@ $('#inboxList').addEventListener('click', async e => {
   if (!t) return;
 
   if (t.dataset.inboxPhoto) {
-    lb = null;                                  // kein Pass dahinter, also kein Löschen
-    $('#lbImg').src = t.src;
-    $('#lbImg').alt = '';
-    $('#lbDel').hidden = true;
-    $('#lightbox').showModal();
+    openSingle(t.src, '');                      // kein Pass dahinter, also kein Löschen
     return;
   }
 
@@ -1006,6 +1079,49 @@ $('#inboxList').addEventListener('click', async e => {
     touch();
   }
 });
+
+/* -------------------------------------------------- Doppelte Fotos --- */
+
+// Erst schauen, dann fragen, dann entfernen. Verglichen werden die Bytes,
+// nicht die Namen – dasselbe Bild zweimal hochgeladen heißt sonst nichts.
+$('#dedupe').onclick = async () => {
+  const btn = $('#dedupe');
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = 'Suche …';
+  inflight++;
+  try {
+    const found = await api.dedupe(false);
+
+    if (found.skipped) {
+      toast(`${found.skipped} Fotos konnten in der Zeit nicht geprüft werden – nochmal aufrufen.`);
+    }
+    if (!found.duplicates) {
+      toast(found.scanned ? 'Keine doppelten Fotos gefunden.' : 'Keine Fotos vorhanden.');
+      return;
+    }
+
+    const auch = found.alsoInOtherPasses && found.alsoInOtherPasses.length;
+    const frage = `${found.duplicates === 1 ? 'Ein doppeltes Foto' : found.duplicates + ' doppelte Fotos'} gefunden.\n\n`
+      + 'Von jedem bleibt eines stehen, die übrigen werden gelöscht.\n'
+      + (auch ? `\nHinweis: ${auch} Bild(er) hängen an mehreren Pässen. Die bleiben unangetastet.\n` : '')
+      + '\nJetzt entfernen?';
+    if (!confirm(frage)) return;
+
+    const done = await api.dedupe(true);
+    toast(done.removed === 1 ? '1 doppeltes Foto entfernt' : `${done.removed} doppelte Fotos entfernt`);
+    await load();
+    await loadInbox();
+  } catch (err) {
+    if (err.status === 401) return recoverAuth();
+    toast(message(err));
+  } finally {
+    inflight--;
+    touch();
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+};
 
 /* ----------------------------------------------------- Live-Abgleich --- */
 
@@ -1075,6 +1191,7 @@ function applyRole() {
   document.body.classList.toggle('guest', !canWrite);
   $('#addPass').hidden = !canWrite;
   $('#bulkPhotos').hidden = !canWrite;
+  $('#dedupe').hidden = !canWrite;
   $('#guestHint').hidden = canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite

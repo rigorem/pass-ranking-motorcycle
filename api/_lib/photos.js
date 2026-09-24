@@ -33,7 +33,8 @@ export function contentType(req) {
 
 // Fingerabdruck der Bytes. Damit lässt sich erkennen, ob dasselbe Foto schon
 // einmal ankam – der Kurzbefehl weiß das von sich aus nicht.
-export const hashKey = sha => 'photohash:' + sha;
+export const hashKey = sha => 'photohash:' + sha;   // Bytes -> Foto-Id
+export const shaKey = id => 'photosha:' + id;       // Foto-Id -> Bytes
 
 export function fingerprint(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
@@ -42,7 +43,7 @@ export function fingerprint(data) {
 // Privater Store: das Blob ist ohne Token von außen gar nicht abrufbar. In
 // Redis liegt nur der Pfad, ausgeliefert wird über /api/photos/<id>, und das
 // prüft vorher die Session.
-export async function storePhoto(data, type) {
+export async function storePhoto(data, type, sha) {
   const id = crypto.randomUUID();
   const blob = await put(`photos/${id}.${EXT[type] || 'jpg'}`, data, {
     access: 'private',
@@ -50,5 +51,22 @@ export async function storePhoto(data, type) {
     contentType: type
   });
   await redis.set(photoKey(id), blob.pathname);
+  // Beide Richtungen merken: die eine erkennt dasselbe Bild beim nächsten
+  // Hochladen, die andere erspart dem Aufräumen das erneute Herunterladen.
+  const digest = sha || fingerprint(data);
+  try {
+    await redis.set(hashKey(digest), id);
+    await redis.set(shaKey(id), digest);
+  } catch { /* ohne Merker läuft es auch, nur doppelt */ }
   return id;
+}
+
+// Schon einmal dagewesen? Dann die vorhandene Id, sonst null.
+export async function knownPhoto(sha) {
+  try {
+    const id = await redis.get(hashKey(sha));
+    if (!id) return null;
+    // Nur melden, wenn das Foto auch wirklich noch existiert.
+    return (await redis.get(photoKey(String(id)))) ? String(id) : null;
+  } catch { return null; }
 }
