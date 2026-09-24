@@ -1,6 +1,6 @@
 import { guardWrite } from './_lib/auth.js';
 import { redis, listPasses, patchPass, photoKey } from './_lib/store.js';
-import { shaKey, hashKey } from './_lib/photos.js';
+import { shaKey, hashKey, isVideoId } from './_lib/photos.js';
 import { listInbox, dropInbox, bumpInboxRev } from './_lib/inbox.js';
 import { get as getBlob, del as deleteBlob } from '@vercel/blob';
 
@@ -79,8 +79,11 @@ export default async function handler(req, res) {
 
     // Fingerabdrücke einsammeln, so weit die Zeit reicht.
     const byHash = new Map();
-    let hashed = 0, skipped = 0, orphans = 0;
+    let hashed = 0, skipped = 0, orphans = 0, videos = 0;
     for (const id of places.keys()) {
+      // Videos bleiben außen vor: sie zu vergleichen hieße, jedes einzelne
+      // herunterzuladen – dafür ist die Laufzeit einer Funktion zu knapp.
+      if (isVideoId(id)) { videos++; continue; }
       if (Date.now() > deadline) { skipped++; continue; }
       const sha = await shaOf(id);
       if (!sha) { orphans++; continue; }
@@ -121,7 +124,7 @@ export default async function handler(req, res) {
     if (!apply) {
       return res.status(200).json({
         applied: false,
-        scanned: places.size, hashed, skipped, orphans,
+        scanned: places.size, hashed, skipped, orphans, videos,
         duplicates: doomed.length,
         groups: withinPass.length,
         alsoInOtherPasses: acrossPasses
@@ -143,7 +146,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       applied: true,
-      scanned: places.size, hashed, skipped, orphans,
+      scanned: places.size, hashed, skipped, orphans, videos,
       removed, groups: withinPass.length,
       alsoInOtherPasses: acrossPasses
     });

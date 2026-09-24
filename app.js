@@ -1,6 +1,14 @@
 // Pässeranking – Frontend. Spricht ausschließlich mit den eigenen /api-Routen.
 
 import { readExif } from '/exif.js';
+import { upload as blobUpload } from '/vendor/blob-client.js';
+
+// Videos sind zu groß für den Rumpf einer Vercel-Funktion (4,5 MB). Sie gehen
+// deshalb mit einem befristeten Schlüssel direkt vom Browser in den Blob-Store
+// und werden danach nur noch angemeldet.
+const VIDEO_PREFIX = 'v-';
+const isVideo = id => String(id).startsWith(VIDEO_PREFIX);
+const isVideoFile = f => String(f.type || '').startsWith('video/');
 
 const $ = s => document.querySelector(s);
 const list = $('#list');
@@ -62,6 +70,8 @@ const api = {
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
   upload: blob => req('/api/photos', { method: 'POST', body: blob }).then(d => d.id),
+  uploadToken: (contentType, size) => req('/api/upload-token', { method: 'POST', body: { contentType, size } }),
+  registerVideo: data => req('/api/videos', { method: 'POST', body: data }),
   // Der Weg mit Ortsangabe: der Server sucht sich den Pass selbst.
   importPhoto: (blob, meta) => req('/api/import', {
     method: 'POST',
@@ -87,6 +97,9 @@ function message(err) {
     case 'upload_not_configured': return 'Der Foto-Import ist noch nicht eingerichtet.';
     case 'pass_id_required': return 'Bitte erst einen Pass auswählen.';
     case 'dedupe_failed': return 'Die Suche nach Doppeln ist fehlgeschlagen.';
+    case 'too_large': return 'Das Video ist zu groß (mehr als 300 MB).';
+    case 'blob_not_configured': return 'Der Videospeicher ist noch nicht eingerichtet.';
+    case 'bad_pathname': return 'Das Video konnte nicht eingetragen werden.';
     case 'unsupported_type': return 'Dieses Bildformat geht nicht.';
     default: return 'Speichern fehlgeschlagen. Bitte nochmal versuchen.';
   }
@@ -209,8 +222,14 @@ function render(changed = EMPTY) {
     if (s !== last) { rank = i + 1; last = s; }
     const rankTxt = s == null ? '–' : rank;
     const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
-    const photos = (p.photos || []).map(id =>
-      `<img src="/api/photos/${encodeURIComponent(id)}" alt="Foto vom ${esc(p.de)}" loading="lazy" data-photo="${esc(id)}" data-pass="${esc(p.id)}">`
+    const photos = (p.photos || []).map(id => isVideo(id)
+      // preload="metadata" holt nur das erste Bild, nicht das ganze Video.
+      ? `<span class="clip" data-photo="${esc(id)}" data-pass="${esc(p.id)}">
+           <video src="/api/photos/${encodeURIComponent(id)}" muted playsinline preload="metadata"
+                  data-photo="${esc(id)}" data-pass="${esc(p.id)}"></video>
+           <span class="play" aria-hidden="true"></span>
+         </span>`
+      : `<img src="/api/photos/${encodeURIComponent(id)}" alt="Foto vom ${esc(p.de)}" loading="lazy" data-photo="${esc(id)}" data-pass="${esc(p.id)}">`
     ).join('');
     return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}" style="--n:${i}">
       <div class="head">
@@ -446,7 +465,7 @@ showTheme(savedTheme());
 
 
 list.addEventListener('click', e => {
-  const t = e.target.closest('button,img,a[data-map]');
+  const t = e.target.closest('button,img,video,span.clip,a[data-map]');
   if (!t) return;
   if (t.dataset.map) {
     // Nicht wegnavigieren: erst die Strecke zeigen, der Weg nach draußen
@@ -484,6 +503,26 @@ list.addEventListener('focusout', e => {
 /* ------------------------------------------------------------- Fotos --- */
 
 // Vor dem Upload verkleinern: spart Speicher und lädt am Berg schneller.
+// Gibt die Id des angelegten Videos zurück. `onProgress` bekommt 0..1.
+async function sendVideo(file, passId, onProgress) {
+  const type = String(file.type || '').split(';')[0];
+  const { token, pathname } = await api.uploadToken(type, file.size);
+  const blob = await blobUpload(pathname, file, {
+    access: 'private',
+    token,
+    contentType: type,
+    multipart: file.size > 8 * 1024 * 1024,
+    onUploadProgress: p => onProgress && onProgress((p && p.percentage != null ? p.percentage / 100 : 0))
+  });
+  const d = await api.registerVideo({
+    pathname: blob.pathname || pathname,
+    contentType: type,
+    passId: passId || '',
+    taken: new Date(file.lastModified || Date.now()).toISOString()
+  });
+  return d.id;
+}
+
 async function shrink(file) {
   try {
     const bmp = await createImageBitmap(file);
@@ -510,10 +549,15 @@ $('#fileIn').addEventListener('change', async e => {
   let lost = false;
   for (const f of files) {
     try {
-      added.push(await api.upload(await shrink(f)));
+      if (isVideoFile(f)) {
+        // Videos hängen sich selbst an den Pass, sie laufen nicht über write().
+        await sendVideo(f, id, p => { if (btn) btn.textContent = Math.round(p * 100) + ' %'; });
+      } else {
+        added.push(await api.upload(await shrink(f)));
+      }
     } catch (err) {
       if (err.status === 401) { lost = true; break; }
-      toast('Ein Foto konnte nicht hochgeladen werden.');
+      toast(message(err));
     }
   }
   if (lost) { await recoverAuth(); return; }
@@ -521,13 +565,12 @@ $('#fileIn').addEventListener('change', async e => {
   if (added.length) {
     const p = passes.find(x => x.id === id);
     write(id, { photos: [...((p && p.photos) || []), ...added] });
-    toast(added.length === 1 ? 'Foto hinzugefügt' : added.length + ' Fotos hinzugefügt');
-  } else {
-    render();
   }
+  await load();
 });
 
 $('#lbClose').onclick = () => $('#lightbox').close();
+$('#lightbox').addEventListener('close', () => { $('#lbVideo').pause(); resetZoom(); });
 $('#lightbox').addEventListener('click', e => { if (e.target.id === 'lightbox') $('#lightbox').close(); });
 $('#lbDel').onclick = async () => {
   if (!lb || !confirm('Dieses Foto entfernen?')) return;
@@ -737,10 +780,10 @@ function openLightbox(passId, photoId) {
 }
 
 // Ein einzelnes Foto ohne Reihe – aus dem Eingang.
-function openSingle(src, alt) {
+function openSingle(src, alt, video) {
   lb = null; lbList = []; lbIndex = -1;
-  $('#lbImg').src = src;
-  $('#lbImg').alt = alt || '';
+  showMedia(src, !!video);
+  if (!video) $('#lbImg').alt = alt || '';
   $('#lbDel').hidden = true;
   updateLbNav();
   $('#lightbox').showModal();
@@ -751,9 +794,24 @@ function showLb(i) {
   lbIndex = (i + lbList.length) % lbList.length;
   const id = lbList[lbIndex];
   if (lb) lb.id = id;
-  $('#lbImg').src = '/api/photos/' + encodeURIComponent(id);
-  $('#lbImg').alt = 'Foto';
+  showMedia('/api/photos/' + encodeURIComponent(id), isVideo(id));
   updateLbNav();
+}
+
+// Ein Feld für beides: Bild oder Video, immer nur eines sichtbar.
+function showMedia(src, video) {
+  const img = $('#lbImg'), vid = $('#lbVideo');
+  vid.pause();
+  if (video) {
+    img.hidden = true; img.removeAttribute('src');
+    vid.hidden = false; vid.src = src;
+  } else {
+    vid.hidden = true; vid.removeAttribute('src');
+    img.hidden = false; img.src = src; img.alt = 'Foto';
+  }
+  // Ein Video bringt eigene Bedienelemente mit, Zoomen wäre dort nur im Weg.
+  stage.classList.toggle('video', !!video);
+  resetZoom();
 }
 
 function updateLbNav() {
@@ -774,18 +832,123 @@ $('#lightbox').addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') { e.preventDefault(); showLb(lbIndex + 1); }
 });
 
+// Wischen zum Blättern, Zwei-Finger zum Vergrößern. Beides am selben Bild,
+// deshalb hängt alles an einem Zustand: solange nicht vergrößert ist, blättert
+// ein waagerechter Wisch; ist vergrößert, schiebt derselbe Wisch den Ausschnitt.
+const MAX_ZOOM = 6;
+let zoom = { scale: 1, x: 0, y: 0 };
 let swipeX = 0, swipeY = 0, swiping = false;
+let panX = 0, panY = 0, panning = false;
+let pinchDist = 0, pinchScale = 1, pinchX = 0, pinchY = 0;
+// Ein Tippen ist nur dann eines, wenn genau ein Finger aufsetzt, kaum wandert
+// und wieder abhebt. Ohne diese Buchführung zählt das Ende einer Zwei-Finger-
+// Geste als Tipp – und der nächste Fingerabdruck als Doppeltipp.
+let tapOk = false, tapX = 0, tapY = 0;
+
 const stage = document.querySelector('.lb-stage');
+const lbImg = $('#lbImg');
+
+function applyZoom() {
+  lbImg.style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`;
+  const on = zoom.scale > 1.01;
+  stage.classList.toggle('zoomed', on);
+  // Ist vergrößert, gehört jede Fingerbewegung dem Bild – sonst scrollt die Seite.
+  stage.style.touchAction = on ? 'none' : 'pan-y';
+  lbImg.style.cursor = on ? 'grab' : '';
+}
+
+function resetZoom() {
+  zoom = { scale: 1, x: 0, y: 0 };
+  lbImg.style.transition = '';
+  applyZoom();
+}
+
+// Nicht über den Rand hinausschieben: bei Vergrößerung n darf höchstens die
+// halbe hinzugekommene Breite verschoben werden.
+function clampZoom() {
+  const r = stage.getBoundingClientRect();
+  const maxX = Math.max(0, (r.width * zoom.scale - r.width) / 2);
+  const maxY = Math.max(0, (r.height * zoom.scale - r.height) / 2);
+  zoom.x = Math.max(-maxX, Math.min(maxX, zoom.x));
+  zoom.y = Math.max(-maxY, Math.min(maxY, zoom.y));
+}
+
+// Um einen Punkt herum vergrößern, damit sich das Bild nicht unter dem Finger
+// wegbewegt.
+function zoomAt(scale, clientX, clientY) {
+  const r = stage.getBoundingClientRect();
+  const cx = clientX - r.left - r.width / 2;
+  const cy = clientY - r.top - r.height / 2;
+  const next = Math.max(1, Math.min(MAX_ZOOM, scale));
+  const k = next / zoom.scale;
+  zoom.x = cx - (cx - zoom.x) * k;
+  zoom.y = cy - (cy - zoom.y) * k;
+  zoom.scale = next;
+  if (zoom.scale <= 1.01) { zoom.x = 0; zoom.y = 0; zoom.scale = 1; }
+  clampZoom();
+  applyZoom();
+}
+
+const spread = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+const middle = t => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
 
 stage.addEventListener('touchstart', e => {
-  if (e.touches.length !== 1) { swiping = false; return; }
-  swipeX = e.touches[0].clientX;
-  swipeY = e.touches[0].clientY;
-  swiping = true;
+  if (stage.classList.contains('video')) return;
+  lbImg.style.transition = '';
+  if (e.touches.length === 1) {
+    tapOk = true; tapX = e.touches[0].clientX; tapY = e.touches[0].clientY;
+  } else {
+    tapOk = false;
+  }
+  if (e.touches.length === 2) {
+    swiping = panning = false;
+    pinchDist = spread(e.touches);
+    pinchScale = zoom.scale;
+    const m = middle(e.touches);
+    pinchX = m.x; pinchY = m.y;
+    return;
+  }
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  if (zoom.scale > 1.01) {
+    panning = true; swiping = false;
+    panX = t.clientX - zoom.x;
+    panY = t.clientY - zoom.y;
+  } else {
+    swiping = true; panning = false;
+    swipeX = t.clientX; swipeY = t.clientY;
+  }
 }, { passive: true });
 
+stage.addEventListener('touchmove', e => {
+  if (stage.classList.contains('video')) return;
+  if (tapOk && e.touches.length === 1) {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - tapX) > 10 || Math.abs(t.clientY - tapY) > 10) tapOk = false;
+  }
+  if (e.touches.length === 2 && pinchDist) {
+    e.preventDefault();
+    const m = middle(e.touches);
+    // Erst auf den neuen Mittelpunkt schieben, dann skalieren – so folgt das
+    // Bild den Fingern, auch wenn sie sich beim Zoomen mitbewegen.
+    zoom.x += m.x - pinchX; zoom.y += m.y - pinchY;
+    pinchX = m.x; pinchY = m.y;
+    zoomAt(pinchScale * (spread(e.touches) / pinchDist), m.x, m.y);
+    return;
+  }
+  if (panning && e.touches.length === 1) {
+    e.preventDefault();
+    zoom.x = e.touches[0].clientX - panX;
+    zoom.y = e.touches[0].clientY - panY;
+    clampZoom();
+    applyZoom();
+  }
+}, { passive: false });
+
 stage.addEventListener('touchend', e => {
-  if (!swiping || lbList.length < 2) { swiping = false; return; }
+  if (e.touches.length === 0) pinchDist = 0;
+  if (panning) { panning = e.touches.length > 0; return; }
+  if (!swiping || lbList.length < 2 || zoom.scale > 1.01) { swiping = false; return; }
   swiping = false;
   const t = e.changedTouches[0];
   const dx = t.clientX - swipeX;
@@ -793,6 +956,37 @@ stage.addEventListener('touchend', e => {
   // Waagerecht und weit genug: sonst war es Scrollen oder ein Tippen.
   if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy)) return;
   showLb(lbIndex + (dx < 0 ? 1 : -1));
+}, { passive: true });
+
+// Trackpad-Geste und Strg+Rad kommen als wheel mit ctrlKey an.
+stage.addEventListener('wheel', e => {
+  if (!e.ctrlKey || stage.classList.contains('video')) return;
+  e.preventDefault();
+  zoomAt(zoom.scale * (1 - e.deltaY / 200), e.clientX, e.clientY);
+}, { passive: false });
+
+// Doppeltippen und Doppelklick: hin und her zwischen ganz und nah.
+stage.addEventListener('dblclick', e => {
+  if (stage.classList.contains('video')) return;
+  e.preventDefault();
+  lbImg.style.transition = 'transform 180ms ease-out';
+  zoomAt(zoom.scale > 1.01 ? 1 : 2.5, e.clientX, e.clientY);
+});
+
+let lastTap = 0;
+stage.addEventListener('touchend', e => {
+  // Nur ein echtes Tippen zählt: ein Finger, kaum bewegt, alle wieder ab.
+  const wasTap = tapOk && e.touches.length === 0 && e.changedTouches.length === 1;
+  tapOk = false;
+  if (!wasTap) { lastTap = 0; return; }
+
+  const now = Date.now();
+  if (now - lastTap < 300) {
+    const t = e.changedTouches[0];
+    lbImg.style.transition = 'transform 180ms ease-out';
+    zoomAt(zoom.scale > 1.01 ? 1 : 2.5, t.clientX, t.clientY);
+    lastTap = 0;
+  } else lastTap = now;
 }, { passive: true });
 
 /* ------------------------------------------------------- Pass-Dialog --- */
@@ -918,6 +1112,16 @@ $('#bulkIn').addEventListener('change', async e => {
       done++;
       $('#uploadStatus').textContent = `${done} von ${files.length} …`;
       try {
+        if (isVideoFile(f)) {
+          // Ein Video kennt keinen Ort, den wir lesen könnten – es geht in den
+          // Eingang und wird dort von Hand zugeordnet.
+          await sendVideo(f, '', p => {
+            $('#uploadStatus').textContent = `${done} von ${files.length} · ${f.name} ${Math.round(p * 100)} %`;
+          });
+          inbox++;
+          logLine(f.name, 'Video · im Eingang', 'none');
+          continue;
+        }
         // Reihenfolge ist entscheidend: erst lesen, dann verkleinern.
         const meta = await readExif(f);
         if (meta.lat !== null) located++;
@@ -943,8 +1147,9 @@ $('#bulkIn').addEventListener('change', async e => {
   if (inbox) parts.push(`${inbox} im Eingang`);
   if (failed) parts.push(`${failed} fehlgeschlagen`);
   // Die Zahl beantwortet nebenbei, ob das Handy den Ort überhaupt mitliefert.
-  $('#uploadStatus').textContent =
-    `${parts.join(', ') || 'nichts geändert'} · ${located} von ${files.length} hatten einen Ort`;
+  const bilder = files.filter(f => !isVideoFile(f)).length;
+  $('#uploadStatus').textContent = parts.join(', ') || 'nichts geändert';
+  if (bilder) $('#uploadStatus').textContent += ` · ${located} von ${bilder} hatten einen Ort`;
   $('#uploadClose').hidden = false;
 
   await load();
@@ -1000,7 +1205,9 @@ function renderInbox() {
           : String(Math.round(s.distanceM / 100) / 10).replace('.', ',') + ' km'}`
       : 'kein Ort im Foto';
     return `<li class="inbox-row" data-photo-row="${esc(it.id)}">
-      <img src="/api/photos/${encodeURIComponent(it.id)}" alt="" loading="lazy" data-inbox-photo="${esc(it.id)}">
+      ${isVideo(it.id)
+        ? `<span class="clip" data-inbox-photo="${esc(it.id)}"><video src="/api/photos/${encodeURIComponent(it.id)}" muted playsinline preload="metadata" data-inbox-photo="${esc(it.id)}"></video><span class="play" aria-hidden="true"></span></span>`
+        : `<img src="/api/photos/${encodeURIComponent(it.id)}" alt="" loading="lazy" data-inbox-photo="${esc(it.id)}">`}
       <span class="inbox-meta">
         <span class="inbox-when">${whenLabel(it.taken)}</span>
         <span class="inbox-near">${near}</span>
@@ -1027,11 +1234,12 @@ function renderInbox() {
 }
 
 $('#inboxList').addEventListener('click', async e => {
-  const t = e.target.closest('button,img');
+  const t = e.target.closest('button,img,video,span.clip');
   if (!t) return;
 
   if (t.dataset.inboxPhoto) {
-    openSingle(t.src, '');                      // kein Pass dahinter, also kein Löschen
+    const id = t.dataset.inboxPhoto;            // kein Pass dahinter, also kein Löschen
+    openSingle('/api/photos/' + encodeURIComponent(id), '', isVideo(id));
     return;
   }
 
@@ -1181,7 +1389,6 @@ function applyRole() {
   $('#addPass').hidden = !canWrite;
   $('#bulkPhotos').hidden = !canWrite;
   $('#dedupe').hidden = !canWrite;
-  $('#guestHint').hidden = canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
     ? 'Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'

@@ -10,6 +10,19 @@ import crypto from 'node:crypto';
 // Bilder vorher auf 1800 px herunter, damit bleibt jedes Foto darunter.
 export const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic']);
 
+// Videos gehen einen anderen Weg: sie sind zu groß für den Rumpf einer
+// Vercel-Funktion (4,5 MB) und wandern deshalb direkt aus dem Browser in den
+// Blob-Store. Siehe api/upload-token.js und api/videos.js.
+export const VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+export const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' };
+export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+
+// Videos tragen ihre Art in der Id. Das ist bewusst schlicht: so bleiben
+// pass.photos, der Eingang und das Löschen unverändert – sie reichen Ids
+// ohnehin nur durch – und der Browser weiß trotzdem, was er anzeigen muss.
+export const VIDEO_PREFIX = 'v-';
+export const isVideoId = id => String(id).startsWith(VIDEO_PREFIX);
+
 const EXT = {
   'image/png': 'png',
   'image/webp': 'webp',

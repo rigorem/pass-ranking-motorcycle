@@ -289,7 +289,7 @@ body.guest .note{background:transparent;padding-left:0;padding-right:0;min-heigh
 }
 
 /* Karten als Milchglas über dem Hintergrundfoto */
-body :is(.pass,.inbox,.actions,.guest-hint,.empty,.notice){
+body :is(.pass,.inbox,.actions,.empty,.notice){
   background:var(--glass);
   -webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%);
 }
@@ -316,12 +316,6 @@ body :is(.pass,.inbox,.actions,.guest-hint,.empty,.notice){
 
 /* ------------------------------------------------ Hinweise, Eingang --- */
 
-.guest-hint{
-  display:flex;gap:10px;align-items:center;margin:0 0 14px;padding:10px 14px;border-radius:var(--r-md);
-  background:var(--surface);color:var(--ink-2);font-size:.875rem;box-shadow:var(--shadow);
-}
-.guest-hint[hidden]{display:none}
-.guest-hint svg{flex:0 0 auto;width:20px;height:20px;fill:var(--tint)}
 body.guest .dots button{cursor:default}
 body.guest .dots button:active{transform:none}
 
@@ -549,7 +543,7 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
   .hero p#intro{font-size:1.0625rem;max-width:52ch}
   .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
   .list > .empty,.list > .notice{grid-column:1/-1}
-  .inbox,.guest-hint{max-width:none}
+  .inbox{max-width:none}
   .actions{max-width:560px;margin-left:auto;margin-right:auto;margin-top:32px}
   .pass{padding:18px 20px 14px}
   .photos{margin-left:-20px;margin-right:-20px;padding:0 20px 2px;scroll-padding:0 20px}
@@ -607,7 +601,7 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
 }
 @media (prefers-reduced-transparency:reduce){
   body::before{display:none}
-  body :is(.pass,.inbox,.actions,.guest-hint,.empty,.notice){-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
+  body :is(.pass,.inbox,.actions,.empty,.notice){-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
   .toast,#suggest,.glass-btn{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
   .glass-btn{background:#333}
   dialog.gate::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--bg)}
@@ -618,7 +612,12 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
 }
 
 /* Lightbox: blättern statt schließen und neu öffnen */
-.lb-stage{position:relative;display:block;touch-action:pan-y}
+.lb-stage{position:relative;display:block;overflow:hidden;touch-action:pan-y}
+#lbImg{transform-origin:center center;will-change:transform;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
+/* Vergrößert blättert man nicht mehr – dann verschwinden die Pfeile. */
+.lb-stage.zoomed .lb-nav,
+.lb-stage.zoomed .lb-count{opacity:0;pointer-events:none}
+.lb-nav,.lb-count{transition:opacity 150ms ease}
 .lb-nav{
   position:absolute;top:50%;display:grid;place-items:center;width:44px;height:44px;
   border:0;padding:0;border-radius:999px;color:#fff;
@@ -643,3 +642,25 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
 @media (hover:none){.lb-nav{display:none}}
 .page-foot{gap:8px}
 
+
+/* Videos: im Streifen ein Standbild mit Abspielzeichen, groß mit Bedienung */
+.clip{position:relative;flex:0 0 auto;display:block;line-height:0}
+.photos .clip video{width:112px;height:84px;object-fit:cover;border-radius:8px;background:var(--seg);cursor:zoom-in}
+.inbox-row .clip video{width:72px;height:72px;object-fit:cover;border-radius:8px;background:var(--seg)}
+.clip .play{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:28px;height:28px;border-radius:50%;background:rgba(14,20,25,.55);
+  pointer-events:none;
+}
+.clip .play::after{
+  content:"";position:absolute;left:52%;top:50%;transform:translate(-50%,-50%);
+  border-style:solid;border-width:6px 0 6px 10px;border-color:transparent transparent transparent #fff;
+}
+#lbVideo{display:block;width:100%;max-height:78vh;background:#000}
+#lbVideo[hidden]{display:none}
+/* Beim Video gehören alle Gesten der Bedienleiste. */
+.lb-stage.video{touch-action:auto}
+@media (max-width:480px){
+  .photos .clip video{width:96px;height:72px}
+  .inbox-row .clip video{width:56px;height:56px}
+}

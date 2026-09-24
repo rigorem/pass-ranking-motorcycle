@@ -322,13 +322,57 @@ und führt die Listen über ein Set zusammen. Zwei Telefone, die gleichzeitig zu
 selben Pass laden, verlieren dadurch nichts, und ein wiederholter Import trägt
 nichts doppelt ein.
 
-## Fotos ansehen
+## Fotos und Videos ansehen
 
-Ein Tipp auf ein Foto öffnet es groß. Von dort lässt sich durch alle Fotos des
-Passes blättern: am Handy durch Wischen, am Rechner mit den Pfeiltasten oder
-den Schaltflächen links und rechts. Ein Zähler zeigt, wo man ist. Wischen wird
-nur als solches gewertet, wenn es waagerecht und weit genug geht – sonst wäre
-jedes Antippen ein Blättern.
+Ein Tipp öffnet die Aufnahme groß. Von dort lässt sich durch alles blättern,
+was am Pass hängt: am Handy durch Wischen, am Rechner mit den Pfeiltasten oder
+den Schaltflächen. Ein Zähler zeigt die Position.
+
+**Vergrößern** geht mit zwei Fingern, per Doppeltipp (und Doppelklick) und am
+Rechner mit Strg+Rad beziehungsweise der Trackpad-Geste. Bis sechsfach; im
+vergrößerten Bild schiebt ein Finger den Ausschnitt, und der Rand lässt sich
+nicht überfahren. Solange vergrößert ist, blättert ein Wisch nicht weiter –
+sonst käme man aus dem Bild nicht mehr heraus. Beim Weiterblättern und beim
+Schließen stellt sich die Ansicht zurück.
+
+Die Gesten müssen sich gegenseitig in Ruhe lassen, deshalb wird mitgeführt, ob
+ein Finger aufgesetzt, kaum gewandert und wieder abgehoben ist. Ohne das zählt
+das Ende einer Zwei-Finger-Geste als Tipp – und die nächste Berührung als
+Doppeltipp, der die Vergrößerung wieder wegnimmt.
+
+Bei einem **Video** übernimmt die Bedienleiste des Browsers; dort wird nicht
+gezoomt und nicht gewischt.
+
+## Videos
+
+Videos gehen einen anderen Weg als Fotos: mit 4,5 MB Rumpfgröße endet bei
+Vercel jede Funktion, ein Handyvideo ist ein Vielfaches davon. Der Browser holt
+sich deshalb von `/api/upload-token` einen **befristeten Schlüssel für genau
+einen Pfad, einen Medientyp und eine Höchstgröße**, lädt damit direkt in den
+Blob-Store und meldet das Ergebnis anschließend über `/api/videos` an. Der
+eigentliche `BLOB_READ_WRITE_TOKEN` bleibt dabei auf dem Server, und
+`/api/videos` nimmt nur Pfade aus dem eigenen `videos/`-Ordner an.
+
+Erlaubt sind MP4, QuickTime (was iPhones aufnehmen) und WebM, bis 300 MB.
+Ausgeliefert werden sie über dieselbe Route wie Fotos, also mit Sessionprüfung.
+
+Dass eine Id zu einem Video gehört, steht in der Id selbst (`v-…`). Das ist
+bewusst schlicht gehalten: Pässe, Eingang und Löschen reichen Ids ohnehin nur
+durch und bleiben dadurch unverändert, und der Browser weiß trotzdem, ob er ein
+`<img>` oder ein `<video>` bauen muss.
+
+Im Streifen steht ein Standbild mit Abspielzeichen (`preload="metadata"` holt
+nur das erste Bild, nicht den ganzen Film).
+
+`vendor/blob-client.js` ist der dafür nötige Browser-Client, gebündelt und
+mitversioniert – neu zu erzeugen mit `node scripts/vendor-blob-client.mjs`.
+Gebündelt deshalb, weil die Datei im Paket ein halbes Dutzend weiterer Pakete
+nachzieht; mitversioniert, damit auf Vercel kein Build-Schritt nötig ist und
+der Browser nichts von einem fremden CDN nachlädt.
+
+**Doppelte Videos** erkennt die Aufräumfunktion nicht: dafür müsste sie jedes
+einzelne herunterladen, und dafür ist die Laufzeit zu knapp. Sie zählt sie in
+der Antwort mit und lässt sie in Ruhe.
 
 ## Gemeinsam bewerten
 

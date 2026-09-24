@@ -34,10 +34,6 @@
 
   <p class="count" id="count"></p>
 
-  <p class="guest-hint" id="guestHint" hidden>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>
-    Gastansicht: Bewertungen, Notizen und Fotos sind hier nur zum Anschauen.
-  </p>
 
   <section class="inbox" id="inbox" hidden>
     <h2 id="inboxTitle">Neue Fotos</h2>
@@ -105,6 +101,7 @@
 <dialog id="lightbox">
   <div class="lb-stage">
     <img id="lbImg" alt="">
+    <video id="lbVideo" controls playsinline preload="metadata" hidden></video>
     <button class="lb-nav prev" id="lbPrev" aria-label="Vorheriges Foto" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <button class="lb-nav next" id="lbNext" aria-label="Nächstes Foto" hidden>
@@ -141,8 +138,8 @@
   </div>
 </dialog>
 
-<input type="file" id="fileIn" accept="image/*" multiple hidden>
-<input type="file" id="bulkIn" accept="image/*" multiple hidden>
+<input type="file" id="fileIn" accept="image/*,video/*" multiple hidden>
+<input type="file" id="bulkIn" accept="image/*,video/*" multiple hidden>
 <div class="toast" id="toast" role="status"></div>
 <script src="/app.js" type="module"></script>
 </body>
