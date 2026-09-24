@@ -565,7 +565,12 @@ $('#fileIn').addEventListener('change', async e => {
   if (added.length) {
     const p = passes.find(x => x.id === id);
     write(id, { photos: [...((p && p.photos) || []), ...added] });
+    // write() schreibt im Hintergrund. Erst abwarten, sonst räumt der nächste
+    // Schritt auf und dieser Schreibvorgang stellt die Doppel danach wieder her.
+    try { await queues[id]; } catch { /* der Fehler ist dort schon gemeldet */ }
   }
+  const doppelt = await sweepDuplicates();
+  if (doppelt) toast(doppelt === 1 ? '1 doppeltes Foto entfernt' : `${doppelt} doppelte Fotos entfernt`);
   await load();
 });
 
@@ -1080,6 +1085,17 @@ $('#logout').onclick = async () => {
   await load();
 };
 
+// Nach jedem Hochladen einmal durchwischen. Neue Doppel entstehen ohnehin
+// keine mehr – beide Wege erkennen dieselben Bytes –, aber Altbestände und
+// Fotos, die vor dieser Prüfung hereinkamen, verschwinden so von selbst.
+// Läuft still: schlägt es fehl, ist das kein Grund, den Upload zu vermelden.
+async function sweepDuplicates() {
+  try {
+    const d = await api.dedupe(true);
+    return d.removed || 0;
+  } catch { return 0; }
+}
+
 /* -------------------------------------------- Fotos sammeln hochladen --- */
 
 // Mehrere Fotos auf einmal: der Ort wird aus der Datei gelesen, bevor sie
@@ -1147,6 +1163,9 @@ $('#bulkIn').addEventListener('change', async e => {
   if (inbox) parts.push(`${inbox} im Eingang`);
   if (failed) parts.push(`${failed} fehlgeschlagen`);
   // Die Zahl beantwortet nebenbei, ob das Handy den Ort überhaupt mitliefert.
+  const doppelt = await sweepDuplicates();
+  if (doppelt) parts.push(doppelt === 1 ? '1 Doppel entfernt' : `${doppelt} Doppel entfernt`);
+
   const bilder = files.filter(f => !isVideoFile(f)).length;
   $('#uploadStatus').textContent = parts.join(', ') || 'nichts geändert';
   if (bilder) $('#uploadStatus').textContent += ` · ${located} von ${bilder} hatten einen Ort`;
@@ -1277,48 +1296,6 @@ $('#inboxList').addEventListener('click', async e => {
   }
 });
 
-/* -------------------------------------------------- Doppelte Fotos --- */
-
-// Erst schauen, dann fragen, dann entfernen. Verglichen werden die Bytes,
-// nicht die Namen – dasselbe Bild zweimal hochgeladen heißt sonst nichts.
-$('#dedupe').onclick = async () => {
-  const btn = $('#dedupe');
-  btn.disabled = true;
-  const label = btn.textContent;
-  btn.textContent = 'Suche …';
-  inflight++;
-  try {
-    const found = await api.dedupe(false);
-
-    if (found.skipped) {
-      toast(`${found.skipped} Fotos konnten in der Zeit nicht geprüft werden – nochmal aufrufen.`);
-    }
-    if (!found.duplicates) {
-      toast(found.scanned ? 'Keine doppelten Fotos gefunden.' : 'Keine Fotos vorhanden.');
-      return;
-    }
-
-    const auch = found.alsoInOtherPasses && found.alsoInOtherPasses.length;
-    const frage = `${found.duplicates === 1 ? 'Ein doppeltes Foto' : found.duplicates + ' doppelte Fotos'} gefunden.\n\n`
-      + 'Von jedem bleibt eines stehen, die übrigen werden gelöscht.\n'
-      + (auch ? `\nHinweis: ${auch} Bild(er) hängen an mehreren Pässen. Die bleiben unangetastet.\n` : '')
-      + '\nJetzt entfernen?';
-    if (!confirm(frage)) return;
-
-    const done = await api.dedupe(true);
-    toast(done.removed === 1 ? '1 doppeltes Foto entfernt' : `${done.removed} doppelte Fotos entfernt`);
-    await load();
-    await loadInbox();
-  } catch (err) {
-    if (err.status === 401) return recoverAuth();
-    toast(message(err));
-  } finally {
-    inflight--;
-    touch();
-    btn.disabled = false;
-    btn.textContent = label;
-  }
-};
 
 /* ----------------------------------------------------- Live-Abgleich --- */
 
@@ -1388,7 +1365,6 @@ function applyRole() {
   document.body.classList.toggle('guest', !canWrite);
   $('#addPass').hidden = !canWrite;
   $('#bulkPhotos').hidden = !canWrite;
-  $('#dedupe').hidden = !canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
     ? 'Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'

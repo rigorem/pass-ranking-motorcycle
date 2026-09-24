@@ -298,10 +298,15 @@ Dasselbe Bild ein zweites Mal hochzuladen legt kein zweites Blob mehr an: über
 einen SHA-256 der Bytes (`photohash:<sha>` und zurück `photosha:<id>`) gibt der
 Server die vorhandene Id aus. Das gilt für beide Wege, Browser wie Import.
 
-Für das, was sich vorher schon angesammelt hat, gibt es unten auf der Seite
-**„Doppelte Fotos suchen"**. Der Aufruf vergleicht Bytes, nicht Dateinamen,
-zeigt erst nur an, was er fände, und entfernt erst nach Rückfrage. Von jeder
-Gruppe bleibt eines stehen.
+Für das, was sich vorher schon angesammelt hat, läuft nach **jedem Hochladen**
+still ein Durchgang: Bytes vergleichen, von jeder Gruppe eines stehen lassen,
+den Rest entfernen. Wurde etwas gefunden, steht es in der Rückmeldung des
+Uploads – sonst merkt man nichts davon. Einen Knopf dafür gibt es nicht mehr;
+es ist Aufräumarbeit, keine Entscheidung.
+
+Der Durchgang wartet ab, bis die Fotoliste des Passes wirklich geschrieben ist.
+Ohne das räumt er auf, während der Upload die Liste noch speichert – und der
+Schreibvorgang stellt die Doppel danach wieder her.
 
 Bewusst zurückhaltend: entfernt wird nur, was **innerhalb desselben Passes**
 doppelt hängt. Dieselbe Aufnahme an zwei verschiedenen Pässen kann Absicht
