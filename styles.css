@@ -226,3 +226,25 @@ body.guest .inbox{display:none}
 .upload-log .where{font:600 .95rem var(--cond);white-space:nowrap}
 .upload-log .where.none{color:var(--muted);font-weight:500}
 .upload-log .where.bad{color:var(--danger)}
+
+/* Lightbox: blättern statt schließen und neu öffnen */
+.lb-stage{position:relative;display:block;touch-action:pan-y}
+.lb-nav{
+  position:absolute;top:50%;transform:translateY(-50%);
+  width:44px;height:64px;border:0;border-radius:8px;
+  background:rgba(14,20,25,.42);color:#fff;font:400 2rem/1 var(--body);
+  display:flex;align-items:center;justify-content:center;
+}
+.lb-nav:hover{background:rgba(14,20,25,.66)}
+.lb-nav.prev{left:6px}
+.lb-nav.next{right:6px}
+.lb-count{
+  position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+  background:rgba(14,20,25,.55);color:#fff;border-radius:999px;
+  padding:.15rem .6rem;font:500 .85rem var(--body);
+}
+/* Auf dem Handy wird gewischt – die Pfeile stünden nur im Bild. */
+@media (hover:none){
+  .lb-nav{display:none}
+}
+.page-foot{gap:18px}

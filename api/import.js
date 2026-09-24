@@ -1,7 +1,7 @@
 import { guardUpload } from './_lib/auth.js';
 import { redis, listPasses, appendPhotos } from './_lib/store.js';
 import { metersBetween } from './_lib/route.js';
-import { ALLOWED, readBody, contentType, storePhoto, fingerprint, hashKey } from './_lib/photos.js';
+import { ALLOWED, readBody, contentType, storePhoto, fingerprint, knownPhoto } from './_lib/photos.js';
 import { inboxKey, bumpInboxRev } from './_lib/inbox.js';
 
 // Nimmt ein Foto vom Kurzbefehl auf dem Handy entgegen: Bild im Rumpf,
@@ -59,14 +59,12 @@ export default async function handler(req, res) {
 
     // Zweimal dasselbe Foto geschickt? Dann die vorhandene Id zurückgeben.
     const sha = fingerprint(data);
-    let known = null;
-    try { known = await redis.get(hashKey(sha)); } catch { /* ohne Cache halt neu */ }
+    const known = await knownPhoto(sha);
     if (known) {
-      return res.status(200).json({ id: String(known), duplicate: true, passId: null });
+      return res.status(200).json({ id: known, duplicate: true, passId: null });
     }
 
-    const id = await storePhoto(data, type);
-    try { await redis.set(hashKey(sha), id); } catch { /* nicht schlimm */ }
+    const id = await storePhoto(data, type, sha);
 
     // Zuordnen, wenn ein Pass nah genug liegt.
     if (lat !== null && lon !== null) {

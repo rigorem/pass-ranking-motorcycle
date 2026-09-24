@@ -36,6 +36,7 @@
   <button class="add-pass" id="addPass" hidden>+ Pass hinzufügen</button>
   <button class="add-pass" id="bulkPhotos" hidden>+ Fotos hochladen, Zuordnung automatisch</button>
   <div class="page-foot">
+    <button class="link" id="dedupe" hidden>Doppelte Fotos suchen</button>
     <button class="link" id="logout" hidden>Abmelden</button>
   </div>
 </div>
@@ -76,7 +77,12 @@
 </dialog>
 
 <dialog id="lightbox">
-  <img id="lbImg" alt="">
+  <div class="lb-stage">
+    <img id="lbImg" alt="">
+    <button class="lb-nav prev" id="lbPrev" aria-label="Vorheriges Foto" hidden>&#8249;</button>
+    <button class="lb-nav next" id="lbNext" aria-label="Nächstes Foto" hidden>&#8250;</button>
+    <span class="lb-count" id="lbCount" hidden></span>
+  </div>
   <div class="row">
     <button class="btn ghost" id="lbDel" hidden>Foto entfernen</button>
     <span style="flex:1"></span>

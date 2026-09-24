@@ -292,6 +292,23 @@ curl -X POST https://<deine-domain>/api/import \
   --data-binary @foto.jpg
 ```
 
+### Doppelte Fotos
+
+Dasselbe Bild ein zweites Mal hochzuladen legt kein zweites Blob mehr an: über
+einen SHA-256 der Bytes (`photohash:<sha>` und zurück `photosha:<id>`) gibt der
+Server die vorhandene Id aus. Das gilt für beide Wege, Browser wie Import.
+
+Für das, was sich vorher schon angesammelt hat, gibt es unten auf der Seite
+**„Doppelte Fotos suchen"**. Der Aufruf vergleicht Bytes, nicht Dateinamen,
+zeigt erst nur an, was er fände, und entfernt erst nach Rückfrage. Von jeder
+Gruppe bleibt eines stehen.
+
+Bewusst zurückhaltend: entfernt wird nur, was **innerhalb desselben Passes**
+doppelt hängt. Dieselbe Aufnahme an zwei verschiedenen Pässen kann Absicht
+sein, wird deshalb nur gemeldet und bleibt unangetastet. Fotos ohne
+gespeicherten Fingerabdruck werden einmalig nachgerechnet; reicht die Laufzeit
+nicht, sagt die Antwort, wie viele offen blieben – dann einfach nochmal.
+
 ### Der Eingang
 
 Was ohne Ortsangabe ankommt oder zu weit von allen Pässen entfernt liegt,
@@ -304,6 +321,14 @@ ist der ganze Bereich unsichtbar. Gäste sehen ihn nie und bekommen auf
 und führt die Listen über ein Set zusammen. Zwei Telefone, die gleichzeitig zum
 selben Pass laden, verlieren dadurch nichts, und ein wiederholter Import trägt
 nichts doppelt ein.
+
+## Fotos ansehen
+
+Ein Tipp auf ein Foto öffnet es groß. Von dort lässt sich durch alle Fotos des
+Passes blättern: am Handy durch Wischen, am Rechner mit den Pfeiltasten oder
+den Schaltflächen links und rechts. Ein Zähler zeigt, wo man ist. Wischen wird
+nur als solches gewertet, wenn es waagerecht und weit genug geht – sonst wäre
+jedes Antippen ein Blättern.
 
 ## Gemeinsam bewerten
 

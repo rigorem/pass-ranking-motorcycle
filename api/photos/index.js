@@ -1,5 +1,5 @@
 import { guard, guardWrite } from '../_lib/auth.js';
-import { ALLOWED, readBody, contentType, storePhoto } from '../_lib/photos.js';
+import { ALLOWED, readBody, contentType, storePhoto, fingerprint, knownPhoto } from '../_lib/photos.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -17,7 +17,14 @@ export default async function handler(req, res) {
   try {
     const data = await readBody(req);
     if (!data.length) return res.status(400).json({ error: 'empty_body' });
-    return res.status(201).json({ id: await storePhoto(data, type) });
+
+    // Dasselbe Bild ein zweites Mal: die vorhandene Id zurückgeben, statt ein
+    // zweites Blob anzulegen. Sonst sammeln sich Doppel an, die niemand sieht.
+    const sha = fingerprint(data);
+    const known = await knownPhoto(sha);
+    if (known) return res.status(200).json({ id: known, duplicate: true });
+
+    return res.status(201).json({ id: await storePhoto(data, type, sha) });
   } catch (e) {
     return res.status(500).json({ error: 'upload_failed', detail: String(e.message || e) });
   }

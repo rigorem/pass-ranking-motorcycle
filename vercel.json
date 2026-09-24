@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/map/[id].js": { "maxDuration": 30 },
-    "api/place.js": { "maxDuration": 15 }
+    "api/place.js": { "maxDuration": 15 },
+    "api/dedupe.js": { "maxDuration": 60 }
   },
   "headers": [
     {
