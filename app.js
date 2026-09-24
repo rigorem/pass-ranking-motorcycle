@@ -12,7 +12,6 @@ const EMPTY = new Set();
 const MAP_VERSION = 2;
 
 let passes = [];
-let sortKey = 'total';
 let pendingRender = false;
 let uploadFor = null;
 let editId = null;
@@ -185,14 +184,13 @@ function render(changed = EMPTY) {
   if (document.activeElement && document.activeElement.classList.contains('note')) { pendingRender = true; return; }
   pendingRender = false;
 
+  // Gerankt wird nach dem Mittel aus Fahrspaß und Ambiente; Unbewertete ans Ende.
   const sorted = passes.slice().sort((a, b) => {
-    const sa = score(a, sortKey), sb = score(b, sortKey);
+    const sa = score(a, 'total'), sb = score(b, 'total');
     if (sa == null && sb == null) return (a.order ?? 0) - (b.order ?? 0);
     if (sa == null) return 1;
     if (sb == null) return -1;
-    if (sb !== sa) return sb - sa;
-    const ta = score(a, 'total') ?? 0, tb = score(b, 'total') ?? 0;
-    return tb - ta || (a.order ?? 0) - (b.order ?? 0);
+    return sb - sa || (a.order ?? 0) - (b.order ?? 0);
   });
 
   $('#count').textContent = passes.length === 1 ? '1 Pass gefahren' : passes.length + ' Pässe gefahren';
@@ -207,7 +205,7 @@ function render(changed = EMPTY) {
 
   let rank = 0, last;
   list.innerHTML = sorted.map((p, i) => {
-    const s = score(p, sortKey);
+    const s = score(p, 'total');
     if (s !== last) { rank = i + 1; last = s; }
     const rankTxt = s == null ? '–' : rank;
     const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
@@ -216,8 +214,10 @@ function render(changed = EMPTY) {
     ).join('');
     return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}" style="--n:${i}">
       <div class="head">
-        <div class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</div>
-        ${cover(p)}
+        <div class="thumb">
+          ${cover(p)}
+          <span class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</span>
+        </div>
         <div class="title">
           <h2>${esc(p.de)}</h2>
           ${intl ? `<p class="intl">${intl}</p>` : ''}
@@ -409,14 +409,6 @@ function diff(oldList, newList) {
 
 /* ---------------------------------------------------------- Ereignisse --- */
 
-document.querySelectorAll('.seg-ctl button').forEach((b, i) => b.addEventListener('click', () => {
-  if (sortKey === b.dataset.sort) return;
-  sortKey = b.dataset.sort;
-  document.querySelectorAll('.seg-ctl button').forEach(x => x.setAttribute('aria-pressed', x === b));
-  $('.seg-thumb').style.transform = `translateX(${i * 100}%)`;
-  render();
-}));
-
 /* -------------------------------------------------------- Darstellung --- */
 
 // Hell, dunkel oder wie das Gerät. Die Wahl gilt nur für dieses Gerät und
@@ -452,9 +444,6 @@ document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('c
 }));
 showTheme(savedTheme());
 
-// Die Leiste bekommt ihr Milchglas erst, wenn Inhalt darunter durchläuft.
-new IntersectionObserver(([e]) => $('#bar').classList.toggle('stuck', !e.isIntersecting))
-  .observe($('.hero'));
 
 list.addEventListener('click', e => {
   const t = e.target.closest('button,img,a[data-map]');

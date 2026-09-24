@@ -349,6 +349,7 @@ was gerade erst lokal passiert ist.
 Beide Achsen gehen von 1 bis 10. Ein erneuter Klick auf den aktuellen Wert setzt
 ihn zurück auf „nicht bewertet“. Die Gesamtwertung ist der Mittelwert der
 vorhandenen Werte – ein Pass mit nur einer Bewertung zählt mit dieser.
+Die Liste steht immer nach dieser Gesamtwertung; eine andere Sortierung gibt es nicht.
 Unbewertete Pässe stehen am Ende und bekommen statt eines Platzes ein „–“,
 sortiert nach `order`. Gleiche Werte teilen sich einen Platz.
 
