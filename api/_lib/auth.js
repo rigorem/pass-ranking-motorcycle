@@ -84,6 +84,25 @@ export function guard(req, res) {
   return role;
 }
 
+// Der Kurzbefehl auf dem Handy kann kein Session-Cookie führen. Er weist sich
+// mit UPLOAD_TOKEN aus – einem eigenen Zugangsmittel, das absichtlich nur zum
+// Hochladen taugt: guard und guardWrite bleiben davon unberührt, ein verlorener
+// Token kann also nichts bewerten und nichts löschen.
+export function guardUpload(req, res) {
+  const token = (process.env.UPLOAD_TOKEN || '').trim();
+  const header = String(req.headers.authorization || '');
+
+  if (token && header.startsWith('Bearer ')) {
+    if (same(header.slice(7).trim(), token)) return true;
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+
+  // Kein Token dabei: dann muss es eine angemeldete Sitzung mit Schreibrecht
+  // sein – so lässt sich derselbe Weg auch aus dem Browser testen.
+  return guardWrite(req, res);
+}
+
 // Zusätzlich vor alles, was etwas verändert. Die Gastansicht blendet diese
 // Knöpfe zwar aus, aber verlassen kann man sich nur auf diese Prüfung hier.
 export function guardWrite(req, res) {

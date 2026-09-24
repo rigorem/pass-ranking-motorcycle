@@ -17,6 +17,8 @@ let editId = null;
 let lb = null;
 let authed = false;
 let canWrite = true;    // Gastansicht: alles sichtbar, nichts veränderbar
+let inboxCount = 0;     // Fotos, die noch keinem Pass gehören
+let inboxItems = [];
 let rev = 0;            // Änderungszähler des Servers, zuletzt gesehen
 let inflight = 0;       // eigene Schreibvorgänge unterwegs
 const queues = {};
@@ -48,7 +50,10 @@ const api = {
   login: password => req('/api/auth', { method: 'POST', body: { password } }),
   logout: () => req('/api/auth', { method: 'DELETE' }),
   list: () => req('/api/passes'),
-  version: () => req('/api/version').then(d => d.rev ?? 0),
+  version: () => req('/api/version'),
+  inbox: () => req('/api/inbox').then(d => d.items || []),
+  assign: (photoIds, passId) => req('/api/inbox', { method: 'POST', body: { photoIds, passId } }),
+  discard: photoIds => req('/api/inbox', { method: 'POST', body: { photoIds, discard: true } }),
   create: data => req('/api/passes', { method: 'POST', body: data }).then(d => d.pass),
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
@@ -64,6 +69,8 @@ function message(err) {
     case 'not_configured': return 'Die Seite ist noch nicht eingerichtet (APP_PASSWORD fehlt).';
     case 'store_unavailable': return 'Der Speicher antwortet gerade nicht.';
     case 'not_found': return 'Dieser Pass existiert nicht mehr.';
+    case 'upload_not_configured': return 'Der Foto-Import ist noch nicht eingerichtet.';
+    case 'pass_id_required': return 'Bitte erst einen Pass auswählen.';
     case 'unsupported_type': return 'Dieses Bildformat geht nicht.';
     default: return 'Speichern fehlgeschlagen. Bitte nochmal versuchen.';
   }
@@ -296,7 +303,7 @@ function write(id, patch) {
       inflight--;
       // Eigene Änderung: der Zähler ist jetzt weiter, ohne dass sie fremd wäre.
       touch();
-      api.version().then(v => { rev = v; }).catch(() => {});
+      api.version().then(v => { rev = v.rev; inboxCount = v.inbox; }).catch(() => {});
     });
 }
 
@@ -704,6 +711,126 @@ $('#logout').onclick = async () => {
   await load();
 };
 
+/* ------------------------------------------------------------ Eingang --- */
+
+// Fotos, die der Kurzbefehl nicht sicher zuordnen konnte. Normalerweise ist
+// hier nichts – dann bleibt der ganze Bereich unsichtbar.
+async function loadInbox() {
+  if (!canWrite) { inboxItems = []; renderInbox(); return; }
+  try {
+    inboxItems = await api.inbox();
+    inboxCount = inboxItems.length;
+  } catch (err) {
+    if (err.status === 401) return recoverAuth();
+    inboxItems = [];
+  }
+  renderInbox();
+}
+
+function whenLabel(taken) {
+  if (!taken) return 'ohne Zeitangabe';
+  const d = new Date(taken.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3'));
+  if (isNaN(d)) return esc(taken);
+  return d.toLocaleString('de-DE', {
+    weekday: 'short', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function renderInbox() {
+  const box = $('#inbox');
+  if (!canWrite || !inboxItems.length) { box.hidden = true; return; }
+
+  $('#inboxTitle').textContent = inboxItems.length === 1
+    ? '1 neues Foto'
+    : inboxItems.length + ' neue Fotos';
+
+  const options = passes.slice()
+    .sort((a, b) => a.de.localeCompare(b.de, 'de'))
+    .map(p => `<option value="${esc(p.id)}">${esc(p.de)}</option>`)
+    .join('');
+
+  $('#inboxList').innerHTML = inboxItems.map(it => {
+    const s = it.suggestion;
+    const near = s
+      ? `in der Nähe: ${esc(s.name)} · ${s.distanceM < 1000
+          ? s.distanceM + ' m'
+          : String(Math.round(s.distanceM / 100) / 10).replace('.', ',') + ' km'}`
+      : 'kein Ort im Foto';
+    return `<li class="inbox-row" data-photo-row="${esc(it.id)}">
+      <img src="/api/photos/${encodeURIComponent(it.id)}" alt="" loading="lazy" data-inbox-photo="${esc(it.id)}">
+      <span class="inbox-meta">
+        <span class="inbox-when">${whenLabel(it.taken)}</span>
+        <span class="inbox-near">${near}</span>
+      </span>
+      <select data-inbox-pass="${esc(it.id)}" aria-label="Pass auswählen">
+        <option value="">Pass wählen …</option>
+        ${options}
+      </select>
+      <span class="inbox-act">
+        <button class="btn" data-inbox-assign="${esc(it.id)}">Zuordnen</button>
+        <button class="btn danger" data-inbox-discard="${esc(it.id)}">Verwerfen</button>
+      </span>
+    </li>`;
+  }).join('');
+
+  // Vorschlag vorwählen, ohne ihn zu erzwingen.
+  for (const it of inboxItems) {
+    if (!it.suggestion) continue;
+    const sel = $('#inboxList').querySelector(`[data-inbox-pass="${CSS.escape(it.id)}"]`);
+    if (sel && passes.some(p => p.id === it.suggestion.passId)) sel.value = it.suggestion.passId;
+  }
+
+  box.hidden = false;
+}
+
+$('#inboxList').addEventListener('click', async e => {
+  const t = e.target.closest('button,img');
+  if (!t) return;
+
+  if (t.dataset.inboxPhoto) {
+    lb = null;                                  // kein Pass dahinter, also kein Löschen
+    $('#lbImg').src = t.src;
+    $('#lbImg').alt = '';
+    $('#lbDel').hidden = true;
+    $('#lightbox').showModal();
+    return;
+  }
+
+  const assignId = t.dataset.inboxAssign;
+  const discardId = t.dataset.inboxDiscard;
+  const id = assignId || discardId;
+  if (!id) return;
+
+  if (discardId && !confirm('Dieses Foto endgültig verwerfen?')) return;
+
+  let passId = '';
+  if (assignId) {
+    const sel = $('#inboxList').querySelector(`[data-inbox-pass="${CSS.escape(id)}"]`);
+    passId = sel ? sel.value : '';
+    if (!passId) { toast('Bitte erst einen Pass auswählen.'); return; }
+  }
+
+  t.disabled = true;
+  inflight++;
+  try {
+    if (assignId) await api.assign([id], passId);
+    else await api.discard([id]);
+    inboxItems = inboxItems.filter(x => x.id !== id);
+    inboxCount = inboxItems.length;
+    renderInbox();
+    toast(assignId ? 'Foto zugeordnet' : 'Foto verworfen');
+    await load();
+  } catch (err) {
+    t.disabled = false;
+    if (err.status === 401) return recoverAuth();
+    toast(message(err));
+  } finally {
+    inflight--;
+    touch();
+  }
+});
+
 /* ----------------------------------------------------- Live-Abgleich --- */
 
 // Zu zweit unterwegs: /api/version ist eine winzige Zahl, die bei jeder
@@ -727,9 +854,12 @@ function interval() {
 // eigene Änderungen noch unterwegs sind – sonst überschreibt der Server, was
 // gerade erst lokal passiert ist.
 function busy() {
+  const active = document.activeElement;
   return inflight > 0 ||
     document.querySelector('dialog[open]') ||
-    (document.activeElement && document.activeElement.classList.contains('note'));
+    (active && active.classList.contains('note')) ||
+    // Während jemand im Eingang einen Pass auswählt, nicht neu bauen.
+    (active && active.closest && active.closest('#inbox'));
 }
 
 async function tick() {
@@ -737,10 +867,14 @@ async function tick() {
   if (authed && document.visibilityState === 'visible' && !busy()) {
     try {
       const v = await api.version();
-      if (v !== rev) {
-        rev = v;
+      if (v.rev !== rev) {
+        rev = v.rev;
         touch();
         await load({ markChanges: true });
+      }
+      if (canWrite && v.inbox !== inboxCount) {
+        inboxCount = v.inbox;
+        await loadInbox();
       }
     } catch (err) {
       if (err.status === 401) await recoverAuth();
@@ -765,6 +899,7 @@ function applyRole() {
   document.body.classList.toggle('guest', !canWrite);
   $('#addPass').hidden = !canWrite;
   $('#guestHint').hidden = canWrite;
+  if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
     ? 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
     : 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente.';
@@ -783,5 +918,6 @@ function applyRole() {
   applyRole();
   $('#logout').hidden = false;
   await load();
+  await loadInbox();
   schedule();
 })();

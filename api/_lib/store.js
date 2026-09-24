@@ -102,6 +102,36 @@ export async function deletePass(id) {
   return pass;
 }
 
+// Fotos anhängen, ohne die Liste des anderen zu überschreiben.
+//
+// patchPass schreibt `photos` als Ganzes. Lesen-Ändern-Schreiben von zwei
+// Geräten gleichzeitig verliert deshalb Fotos. Eine kurze Sperre macht das
+// Fenster klein, und das Zusammenführen über ein Set macht den Aufruf
+// wiederholbar: derselbe Import zweimal trägt nichts doppelt ein.
+export async function appendPhotos(id, photoIds) {
+  const ids = (Array.isArray(photoIds) ? photoIds : [photoIds]).map(String).filter(Boolean);
+  if (!ids.length) return getPass(id);
+
+  const lock = `pass:${id}:photolock`;
+  let held = false;
+  for (let tries = 0; tries < 2 && !held; tries++) {
+    try {
+      held = Boolean(await redis.set(lock, '1', { nx: true, ex: 5 }));
+    } catch { held = true; }          // ohne Sperre lieber schreiben als verlieren
+    if (!held) await new Promise(r => setTimeout(r, 250));
+  }
+
+  try {
+    const pass = await getPass(id);
+    if (!pass) return null;
+    const merged = [...new Set([...(pass.photos || []), ...ids])];
+    if (merged.length === (pass.photos || []).length) return pass;
+    return await patchPass(id, { photos: merged });
+  } finally {
+    if (held) { try { await redis.del(lock); } catch { /* läuft ohnehin ab */ } }
+  }
+}
+
 export async function nextOrder() {
   const all = await listPasses();
   return all.reduce((m, p) => Math.max(m, p.order || 0), 0) + 1;

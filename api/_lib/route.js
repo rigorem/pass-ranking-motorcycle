@@ -7,7 +7,7 @@ const RADIUS = 6000;      // Meter, in denen nach Straßen gesucht wird
 const REACH = 7000;       // Meter, die ab dem Pass je Richtung mitgenommen werden
 const MAX_POINTS = 380;
 
-function metersBetween(a, b) {
+export function metersBetween(a, b) {
   const R = 6371000;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
   const dLon = (b.lon - a.lon) * Math.PI / 180;

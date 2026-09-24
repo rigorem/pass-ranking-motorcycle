@@ -174,3 +174,31 @@ a.cover{cursor:pointer}
 body.guest .dots button{cursor:default}
 body.guest .dots button:hover{filter:none}
 body.guest .note{border-style:dashed;opacity:.85}
+
+/* Eingang: Fotos ohne sichere Zuordnung */
+.inbox{
+  margin:0 0 18px;padding:14px;border-radius:14px;
+  background:var(--surface);border:1px solid var(--line);
+}
+.inbox h2{font:700 1.5rem var(--cond);margin:0}
+.inbox-hint{margin:.25rem 0 12px;color:var(--muted);font-size:.9rem}
+.inbox-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.inbox-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.inbox-row img{
+  flex:0 0 auto;width:72px;height:72px;object-fit:cover;border-radius:8px;
+  background:var(--seg);border:1px solid var(--line);cursor:zoom-in;
+}
+.inbox-meta{flex:1;min-width:140px}
+.inbox-when{display:block;font:600 1rem var(--cond)}
+.inbox-near{display:block;font-size:.85rem;color:var(--muted)}
+.inbox-row select{
+  border:1px solid var(--line);border-radius:8px;background:var(--bg);
+  padding:.45rem .5rem;font:400 .95rem var(--body);max-width:100%;
+}
+.inbox-act{display:flex;gap:8px}
+.inbox-act .btn{padding:.45rem .9rem;font-size:.95rem}
+body.guest .inbox{display:none}
+@media (max-width:420px){
+  .inbox-row img{width:56px;height:56px}
+  .inbox-row select{flex:1;min-width:0}
+}

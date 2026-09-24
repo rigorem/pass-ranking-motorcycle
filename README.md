@@ -17,6 +17,10 @@ api/
   auth.js              POST – anmelden, DELETE – abmelden
   version.js           GET  – Änderungszähler für den Live-Abgleich
   place.js             GET  – Koordinate -> Gegend (Nominatim, gecacht)
+  import.js            POST – Foto vom Handy, ordnet nach Koordinaten zu
+  inbox.js             GET/POST – Fotos ohne sichere Zuordnung
+  _lib/photos.js       Ablegen im Blob, gemeinsam für Upload und Import
+  _lib/inbox.js        Der Eingang
   map/[id].js          GET  – Kartenbild mit Streckenverlauf
   _lib/route.js        Straßenverlauf über den Pass aus OpenStreetMap
   _lib/tilemap.js      Setzt Kacheln zusammen und zeichnet die Strecke darauf
@@ -95,7 +99,9 @@ Ein Passwortwechsel meldet dann alle ab, was meistens erwünscht ist.
      leer. Das freie Kontingent genügt: gebraucht werden nur Rasterkacheln,
      nicht die kostenpflichtige Static-Maps-API
    - optional `SESSION_SECRET` (`openssl rand -hex 32`)
+   - `UPLOAD_TOKEN` – für den Foto-Import vom Handy (`openssl rand -hex 32`)
    - optional `MAPTILER_STYLE`, voreingestellt `streets-v4`
+   - optional `MATCH_RADIUS_M`, voreingestellt `3000`
 
    Der Schlüssel wird nur auf dem Server benutzt und erreicht den Browser nie.
    In den Schlüsseleinstellungen bei MapTiler bleiben die **Allowed HTTP
@@ -198,6 +204,82 @@ Pässe, die vor dieser Änderung angelegt wurden, haben noch keine Koordinaten:
 node --env-file=.env.local scripts/backfill-coords.mjs          # zeigt an
 node --env-file=.env.local scripts/backfill-coords.mjs --write  # schreibt
 ```
+
+## Fotos vom Handy, automatisch beim richtigen Pass
+
+Ein Kurzbefehl auf dem iPhone liest die Metadaten des **Originals**, verkleinert
+das Bild und lädt es hoch; der Server sucht den nächstgelegenen Pass und ordnet
+zu. Fotos innerhalb von `MATCH_RADIUS_M` (Vorgabe 3000 m) landen direkt dort,
+alles andere im Eingang.
+
+Warum nicht über das geteilte iCloud-Album: **Apple rechnet Bilder beim Anlegen
+eines geteilten Albums neu und wirft EXIF weg.** Die Schnittstelle kennt nur
+`photoGuid`, `caption`, `dateCreated` und Ableitungen – keine Koordinaten. Die
+Ortsangabe fehlt nicht in der API, sie fehlt in den Dateien. Die Originale in
+der Mediathek haben sie noch, deshalb führt der Weg am Album vorbei.
+
+### Der Kurzbefehl
+
+| # | Aktion | Einstellung |
+| --- | --- | --- |
+| 1 | Bei Ausführung erhalten | Bilder, aus dem Teilen-Menü |
+| 2 | Wiederhole mit jedem | über die erhaltenen Bilder |
+| 3 | Bilddetails abrufen | **Metadaten-Wörterbuch** |
+| 4 | Wörterbuchwert abrufen | `{GPS}` → `Latitude`, dann `Longitude` |
+| 5 | Wörterbuchwert abrufen | `{Exif}` → `DateTimeOriginal` |
+| 6 | Bild konvertieren | nach JPEG |
+| 7 | Bildgröße ändern | längste Kante 1800 px |
+| 8 | Inhalte von URL abrufen | siehe unten |
+
+**Die Schritte 3–5 müssen vor dem Konvertieren und Verkleinern laufen.** Danach
+sind die Metadaten weg – derselbe Effekt, der das geteilte Album unbrauchbar
+macht.
+
+```
+POST https://<deine-domain>/api/import
+  Authorization: Bearer <UPLOAD_TOKEN>
+  Content-Type:  image/jpeg
+  X-Photo-Lat:   <Latitude>
+  X-Photo-Lon:   <Longitude>
+  X-Photo-Taken: <DateTimeOriginal>
+  Body: die verkleinerte Datei
+```
+
+Die Koordinaten stehen in Kopfzeilen, nicht in der Adresse – Query-Strings
+landen in Logs, Standortdaten haben dort nichts zu suchen. `Latitude` kommt aus
+dem Metadaten-Wörterbuch und nicht aus der `Ort`-Eigenschaft: `Ort` liefert eine
+Postadresse, keine Koordinaten.
+
+Die Antwort ist kurz genug für eine Benachrichtigung am Handy:
+
+```json
+{ "id": "…", "passId": "pordoijoch", "passName": "Pordoijoch", "distanceM": 167 }
+```
+
+Dasselbe Foto zweimal zu schicken ist harmlos: über einen SHA-256 der Bytes
+(`photohash:<sha>`) wird die vorhandene Id zurückgegeben, kein zweites Blob.
+
+Ohne iPhone lässt sich der Weg genauso prüfen:
+
+```sh
+curl -X POST https://<deine-domain>/api/import \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" -H 'Content-Type: image/jpeg' \
+  -H 'X-Photo-Lat: 46.4876' -H 'X-Photo-Lon: 11.8122' \
+  --data-binary @foto.jpg
+```
+
+### Der Eingang
+
+Was ohne Ortsangabe ankommt oder zu weit von allen Pässen entfernt liegt,
+sammelt sich über der Rangliste – mit Aufnahmezeit und dem nächstgelegenen Pass
+samt Entfernung als Vorschlag. Ein Griff ordnet zu oder verwirft. Ist er leer,
+ist der ganze Bereich unsichtbar. Gäste sehen ihn nie und bekommen auf
+`/api/inbox` eine 403.
+
+`appendPhotos` in `api/_lib/store.js` hängt Fotos mit einer kurzen Sperre an
+und führt die Listen über ein Set zusammen. Zwei Telefone, die gleichzeitig zum
+selben Pass laden, verlieren dadurch nichts, und ein wiederholter Import trägt
+nichts doppelt ein.
 
 ## Gemeinsam bewerten
 
