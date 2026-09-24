@@ -37,8 +37,8 @@ scripts/build-passes.mjs  Baut den Pässe-Katalog aus OpenStreetMap
 scripts/backfill-coords.mjs  Trägt Koordinaten bei alten Pässen nach
 ```
 
-Kein Build-Schritt, kein Framework. Die einzige externe Ressource im Browser
-sind Barlow und Barlow Condensed von Google Fonts.
+Kein Build-Schritt, kein Framework, keine externen Ressourcen im Browser –
+die Oberfläche nutzt die Systemschrift des Geräts.
 
 ## Speicher
 
@@ -157,7 +157,7 @@ Mundart wie eure eigenen Einträge (OSM schreibt „Ju de Frara“, ihr
 
 ## Karte und Streckenverlauf
 
-Jede Passkarte hat links neben dem Schild eine Kachel mit dem Streckenverlauf:
+Jede Passkarte hat links neben dem Namen eine Kachel mit dem Streckenverlauf:
 die Passstraße mit ihren Kehren, über eine Karte gelegt. Eigene Fotos stehen
 weiter unten im Streifen – beim Scrollen hilft die Form der Straße beim
 Wiedererkennen mehr als ein Ausschnitt Himmel. Ein Tipp auf die Kachel öffnet

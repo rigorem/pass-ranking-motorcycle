@@ -198,40 +198,89 @@ function render(changed = EMPTY) {
     return;
   }
 
+  const before = positions();
+  const first = !list.querySelector('.pass');
+
   let rank = 0, last;
   list.innerHTML = sorted.map((p, i) => {
     const s = score(p, sortKey);
     if (s !== last) { rank = i + 1; last = s; }
     const rankTxt = s == null ? '–' : rank;
-    const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' / ');
+    const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
     const photos = (p.photos || []).map(id =>
       `<img src="/api/photos/${encodeURIComponent(id)}" alt="Foto vom ${esc(p.de)}" loading="lazy" data-photo="${esc(id)}" data-pass="${esc(p.id)}">`
     ).join('');
-    return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}">
-      <div class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</div>
-      <div>
-        <div class="head">
-          ${cover(p)}
-          <div class="plate"><div class="plate-in">
-            <h2>${esc(p.de)}</h2>${p.alt ? `<span class="alt">${esc(p.alt)} m</span>` : '<span></span>'}
-            ${intl ? `<div class="intl">${intl}</div>` : ''}
-          </div></div>
+    return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}" style="--n:${i}">
+      <div class="head">
+        <div class="rank" aria-label="Platz ${rankTxt}">${rankTxt}</div>
+        ${cover(p)}
+        <div class="title">
+          <h2>${esc(p.de)}</h2>
+          ${intl ? `<p class="intl">${intl}</p>` : ''}
+          ${p.alt || p.region ? `<p class="meta">${p.alt ? `<span class="sign">${esc(p.alt)} m</span>` : ''}${p.region ? `<span class="region">${esc(p.region)}</span>` : ''}</p>` : ''}
         </div>
-        ${p.region ? `<p class="region">${esc(p.region)}</p>` : ''}
-        ${facts(p)}
-        <div class="ratings">
-          ${rateRow(p, 'fun', 'Fahrspaß')}
-          ${rateRow(p, 'amb', 'Ambiente')}
-        </div>
-        ${photos || canWrite ? `<div class="photos">${photos}${canWrite ? `<button class="add-photo" data-upload="${esc(p.id)}">+ Fotos</button>` : ''}</div>` : ''}
-        ${canWrite || p.note ? `<textarea class="note" data-note="${esc(p.id)}" rows="2" placeholder="Notiz: Straßenzustand, Verkehr, Einkehr …"${canWrite ? '' : ' readonly'}>${esc(p.note)}</textarea>` : ''}
-        <div class="foot">
-          ${hasPlace(p) ? `<a class="link" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener" data-map="${esc(p.id)}">Strecke ansehen</a>` : ''}
-          ${canWrite ? `<button class="link" data-edit="${esc(p.id)}">Namen und Daten bearbeiten</button>` : ''}
-        </div>
+      </div>
+      ${facts(p)}
+      <div class="ratings">
+        ${rateRow(p, 'fun', 'Fahrspaß')}
+        ${rateRow(p, 'amb', 'Ambiente')}
+      </div>
+      ${photos || canWrite ? `<div class="photos">${photos}${canWrite ? `<button class="add-photo" data-upload="${esc(p.id)}">${ICON_CAMERA}Fotos</button>` : ''}</div>` : ''}
+      ${canWrite || p.note ? `<textarea class="note" data-note="${esc(p.id)}" rows="2" placeholder="Notiz: Straßenzustand, Verkehr, Einkehr …"${canWrite ? '' : ' readonly'}>${esc(p.note)}</textarea>` : ''}
+      <div class="foot">
+        ${hasPlace(p) ? `<a class="link" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener" data-map="${esc(p.id)}">${ICON_ROUTE}Strecke</a>` : ''}
+        ${canWrite ? `<button class="link" data-edit="${esc(p.id)}">Bearbeiten</button>` : ''}
       </div>
     </li>`;
   }).join('');
+
+  if (first) {
+    list.classList.add('enter');
+    setTimeout(() => list.classList.remove('enter'), 900);
+  } else {
+    glide(before);
+  }
+}
+
+const ICON_CAMERA = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+const ICON_ROUTE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c-3.9 0-7 3.1-7 7 0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+
+/* ------------------------------------------------------ Umsortieren --- */
+
+// Wenn eine Bewertung die Reihenfolge ändert, springt die Karte nicht, sondern
+// gleitet an ihren neuen Platz – so sieht man, wohin sie gewandert ist.
+// Gemessen wird die Position auf dem Bildschirm, auch mitten in einer
+// laufenden Bewegung; eine neue setzt also dort an, wo die alte gerade ist.
+function positions() {
+  const out = new Map();
+  for (const li of list.querySelectorAll('.pass')) out.set(li.dataset.id, li.getBoundingClientRect().top);
+  return out;
+}
+
+// Kritisch gedämpfte Feder (kein Überschwingen), als linear()-Kurve für WAAPI.
+const SPRING = (() => {
+  const w = 2 * Math.PI / 0.42;          // Ansprechzeit 0,42 s
+  const dur = 0.7, steps = 32, pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * dur;
+    pts.push((1 - (1 + w * t) * Math.exp(-w * t)).toFixed(4));
+  }
+  pts[steps] = '1';
+  return { easing: `linear(${pts.join(',')})`, duration: dur * 1000 };
+})();
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+function glide(before) {
+  if (reduceMotion.matches || !before.size) return;
+  for (const li of list.querySelectorAll('.pass')) {
+    const was = before.get(li.dataset.id);
+    if (was === undefined) continue;
+    const dy = was - li.getBoundingClientRect().top;
+    if (Math.abs(dy) < 1) continue;
+    const frames = [{ transform: `translateY(${dy}px)` }, { transform: 'none' }];
+    try { li.animate(frames, SPRING); }
+    catch { li.animate(frames, { duration: 450, easing: 'cubic-bezier(.32,.72,0,1)' }); }
+  }
 }
 
 function rateRow(p, key, label) {
@@ -272,17 +321,18 @@ function cover(p) {
 // Erscheint, sobald das Kartenbild einmal gebaut wurde.
 function facts(p) {
   const bits = [];
-  if (p.ref) bits.push(esc(p.ref));
-  if (p.km) bits.push(`${String(p.km).replace('.', ',')} km`);
+  const fact = (value, label) => `<li><b>${value}</b>${label}</li>`;
+  if (p.ref) bits.push(`<li class="ref"><b>${esc(p.ref)}</b></li>`);
+  if (p.km) bits.push(fact(String(p.km).replace('.', ','), 'km'));
   if (p.curves) {
-    bits.push(p.curves === 1 ? '1 Kurve' : `${p.curves} Kurven`);
-    if (p.hairpins) bits.push(p.hairpins === 1 ? '1 Kehre' : `${p.hairpins} Kehren`);
+    bits.push(fact(p.curves, p.curves === 1 ? 'Kurve' : 'Kurven'));
+    if (p.hairpins) bits.push(fact(p.hairpins, p.hairpins === 1 ? 'Kehre' : 'Kehren'));
     if (p.km) {
       const perKm = Math.round((p.curves / p.km) * 10) / 10;
-      if (perKm >= 1) bits.push(`${String(perKm).replace('.', ',')} Kurven/km`);
+      if (perKm >= 1) bits.push(fact(String(perKm).replace('.', ','), 'Kurven/km'));
     }
   }
-  return bits.length ? `<p class="facts">${bits.join(' · ')}</p>` : '';
+  return bits.length ? `<ul class="facts">${bits.join('')}</ul>` : '';
 }
 
 /* --------------------------------------------------------- Schreiben --- */
@@ -350,11 +400,17 @@ function diff(oldList, newList) {
 
 /* ---------------------------------------------------------- Ereignisse --- */
 
-document.querySelectorAll('.seg-ctl button').forEach(b => b.addEventListener('click', () => {
+document.querySelectorAll('.seg-ctl button').forEach((b, i) => b.addEventListener('click', () => {
+  if (sortKey === b.dataset.sort) return;
   sortKey = b.dataset.sort;
   document.querySelectorAll('.seg-ctl button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  $('.seg-thumb').style.transform = `translateX(${i * 100}%)`;
   render();
 }));
+
+// Die Leiste bekommt ihr Milchglas erst, wenn Inhalt darunter durchläuft.
+new IntersectionObserver(([e]) => $('#bar').classList.toggle('stuck', !e.isIntersecting))
+  .observe($('.hero'));
 
 list.addEventListener('click', e => {
   const t = e.target.closest('button,img,a[data-map]');
@@ -982,8 +1038,8 @@ function applyRole() {
   $('#guestHint').hidden = canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
-    ? 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
-    : 'Dolomiten und Südtirol, bewertet nach Fahrspaß und Ambiente.';
+    ? 'Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
+    : 'Bewertet nach Fahrspaß und Ambiente.';
 }
 
 (async () => {
