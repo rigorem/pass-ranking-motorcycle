@@ -34,6 +34,7 @@
   </section>
   <ol class="list" id="list"><li class="notice">Lade Pässe …</li></ol>
   <button class="add-pass" id="addPass" hidden>+ Pass hinzufügen</button>
+  <button class="add-pass" id="bulkPhotos" hidden>+ Fotos hochladen, Zuordnung automatisch</button>
   <div class="page-foot">
     <button class="link" id="logout" hidden>Abmelden</button>
   </div>
@@ -93,7 +94,20 @@
   </div>
 </dialog>
 
+<dialog id="uploadDlg">
+  <div class="form">
+    <h3 id="uploadTitle">Fotos werden hochgeladen</h3>
+    <p class="hint" id="uploadStatus"></p>
+    <ul class="upload-log" id="uploadLog"></ul>
+    <div class="row">
+      <span style="flex:1"></span>
+      <button type="button" class="btn ghost" id="uploadClose" hidden>Schließen</button>
+    </div>
+  </div>
+</dialog>
+
 <input type="file" id="fileIn" accept="image/*" multiple hidden>
+<input type="file" id="bulkIn" accept="image/*" multiple hidden>
 <div class="toast" id="toast" role="status"></div>
 <script src="/app.js" type="module"></script>
 </body>

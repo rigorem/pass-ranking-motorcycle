@@ -202,3 +202,19 @@ body.guest .inbox{display:none}
   .inbox-row img{width:56px;height:56px}
   .inbox-row select{flex:1;min-width:0}
 }
+
+/* Sammel-Upload mit Fortschritt */
+#uploadDlg{max-width:min(520px,calc(100vw - 24px))}
+.upload-log{
+  list-style:none;margin:0;padding:0;max-height:min(46vh,300px);overflow-y:auto;
+  display:flex;flex-direction:column;gap:2px;
+}
+.upload-log li{
+  display:flex;gap:8px;justify-content:space-between;align-items:baseline;
+  padding:.3rem .1rem;border-bottom:1px solid var(--line);font-size:.9rem;
+}
+.upload-log li:last-child{border-bottom:0}
+.upload-log .name{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.upload-log .where{font:600 .95rem var(--cond);white-space:nowrap}
+.upload-log .where.none{color:var(--muted);font-weight:500}
+.upload-log .where.bad{color:var(--danger)}

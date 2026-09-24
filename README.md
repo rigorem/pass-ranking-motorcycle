@@ -205,12 +205,35 @@ node --env-file=.env.local scripts/backfill-coords.mjs          # zeigt an
 node --env-file=.env.local scripts/backfill-coords.mjs --write  # schreibt
 ```
 
-## Fotos vom Handy, automatisch beim richtigen Pass
+## Fotos hochladen, Zuordnung automatisch
 
-Ein Kurzbefehl auf dem iPhone liest die Metadaten des **Originals**, verkleinert
-das Bild und lädt es hoch; der Server sucht den nächstgelegenen Pass und ordnet
-zu. Fotos innerhalb von `MATCH_RADIUS_M` (Vorgabe 3000 m) landen direkt dort,
-alles andere im Eingang.
+Es gibt zwei Wege, beide enden im selben `POST /api/import`: der Server liest
+die Koordinaten, sucht den nächstgelegenen Pass und hängt das Foto dort an.
+Innerhalb von `MATCH_RADIUS_M` (Vorgabe 3000 m) wird zugeordnet, alles andere
+landet im Eingang.
+
+### Aus der App heraus
+
+**„+ Fotos hochladen, Zuordnung automatisch"** unter der Liste: beliebig viele
+Fotos auswählen, den Rest macht die Seite. `exif.js` liest Ort und Aufnahmezeit
+**aus der ausgewählten Datei**, bevor `shrink()` sie durchs Canvas schickt –
+danach wären die Metadaten weg. Ein Fortschrittsfenster zeigt für jedes Foto,
+wo es gelandet ist, und am Ende, wie viele überhaupt einen Ort dabei hatten.
+
+Die Zahl ist auch die Antwort auf die Frage, ob das eigene Gerät den Ort
+überhaupt mitgibt: kommt dort `0 von 12` heraus, liefert der Browser die
+Metadaten nicht aus, und der Weg über den Kurzbefehl ist der richtige.
+
+`exif.js` ist ein kleiner Parser ohne Abhängigkeit: JPEG-APP1 suchen,
+TIFF-Kopf lesen, im GPS-Verzeichnis Breite und Länge als Grad/Minuten/Sekunden
+einsammeln, im Exif-Verzeichnis `DateTimeOriginal`. Alles andere wird
+ignoriert. Findet er nichts, wird trotzdem hochgeladen – das Foto geht dann in
+den Eingang.
+
+Das **„+ Fotos" am einzelnen Pass** bleibt, wie es war: dort ist der Pass ja
+schon gewählt, ein Ort wird nicht gebraucht.
+
+### Vom Handy per Kurzbefehl
 
 Warum nicht über das geteilte iCloud-Album: **Apple rechnet Bilder beim Anlegen
 eines geteilten Albums neu und wirft EXIF weg.** Die Schnittstelle kennt nur
@@ -218,7 +241,8 @@ eines geteilten Albums neu und wirft EXIF weg.** Die Schnittstelle kennt nur
 Ortsangabe fehlt nicht in der API, sie fehlt in den Dateien. Die Originale in
 der Mediathek haben sie noch, deshalb führt der Weg am Album vorbei.
 
-### Der Kurzbefehl
+Wenn der Browser die Metadaten nicht durchreicht, liest ein Kurzbefehl sie
+direkt aus dem Original.
 
 | # | Aktion | Einstellung |
 | --- | --- | --- |

@@ -1,5 +1,7 @@
 // Pässeranking – Frontend. Spricht ausschließlich mit den eigenen /api-Routen.
 
+import { readExif } from '/exif.js';
+
 const $ = s => document.querySelector(s);
 const list = $('#list');
 const EMPTY = new Set();
@@ -29,8 +31,8 @@ class ApiError extends Error {
   constructor(status, code) { super(code || String(status)); this.status = status; this.code = code; }
 }
 
-async function req(path, { method = 'GET', body, type } = {}) {
-  const opts = { method, credentials: 'same-origin', headers: {} };
+async function req(path, { method = 'GET', body, type, headers } = {}) {
+  const opts = { method, credentials: 'same-origin', headers: { ...(headers || {}) } };
   if (body !== undefined) {
     if (body instanceof Blob) { opts.headers['Content-Type'] = type || body.type || 'image/jpeg'; opts.body = body; }
     else { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
@@ -58,6 +60,17 @@ const api = {
   patch: (id, data) => req('/api/passes/' + encodeURIComponent(id), { method: 'PATCH', body: data }).then(d => d.pass),
   remove: id => req('/api/passes/' + encodeURIComponent(id), { method: 'DELETE' }),
   upload: blob => req('/api/photos', { method: 'POST', body: blob }).then(d => d.id),
+  // Der Weg mit Ortsangabe: der Server sucht sich den Pass selbst.
+  importPhoto: (blob, meta) => req('/api/import', {
+    method: 'POST',
+    body: blob,
+    headers: {
+      ...(meta.lat !== null && meta.lon !== null
+        ? { 'X-Photo-Lat': String(meta.lat), 'X-Photo-Lon': String(meta.lon) }
+        : {}),
+      ...(meta.taken ? { 'X-Photo-Taken': meta.taken } : {})
+    }
+  }),
   removePhoto: id => req('/api/photos/' + encodeURIComponent(id), { method: 'DELETE' })
 };
 
@@ -711,6 +724,73 @@ $('#logout').onclick = async () => {
   await load();
 };
 
+/* -------------------------------------------- Fotos sammeln hochladen --- */
+
+// Mehrere Fotos auf einmal: der Ort wird aus der Datei gelesen, bevor sie
+// durchs Canvas geht – danach wäre er weg. Was einen Ort hat, landet direkt
+// beim nächstgelegenen Pass, der Rest im Eingang.
+$('#bulkPhotos').onclick = () => $('#bulkIn').click();
+
+function logLine(name, where, kind) {
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="name">${esc(name)}</span><span class="where${kind ? ' ' + kind : ''}">${esc(where)}</span>`;
+  $('#uploadLog').append(li);
+  li.scrollIntoView({ block: 'nearest' });
+}
+
+$('#bulkIn').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+
+  $('#uploadLog').innerHTML = '';
+  $('#uploadClose').hidden = true;
+  $('#uploadTitle').textContent = files.length === 1 ? '1 Foto' : files.length + ' Fotos';
+  $('#uploadStatus').textContent = 'Wird vorbereitet …';
+  $('#uploadDlg').showModal();
+
+  let done = 0, placed = 0, inbox = 0, failed = 0, located = 0;
+  inflight++;
+  try {
+    for (const f of files) {
+      done++;
+      $('#uploadStatus').textContent = `${done} von ${files.length} …`;
+      try {
+        // Reihenfolge ist entscheidend: erst lesen, dann verkleinern.
+        const meta = await readExif(f);
+        if (meta.lat !== null) located++;
+        const blob = await shrink(f);
+        const r = await api.importPhoto(blob, meta);
+
+        if (r.duplicate) logLine(f.name, 'schon vorhanden', 'none');
+        else if (r.passId) { placed++; logLine(f.name, `${r.passName} · ${r.distanceM} m`); }
+        else { inbox++; logLine(f.name, meta.lat === null ? 'kein Ort im Foto' : 'kein Pass in der Nähe', 'none'); }
+      } catch (err) {
+        failed++;
+        if (err.status === 401) { $('#uploadDlg').close(); await recoverAuth(); return; }
+        logLine(f.name, 'fehlgeschlagen', 'bad');
+      }
+    }
+  } finally {
+    inflight--;
+    touch();
+  }
+
+  const parts = [];
+  if (placed) parts.push(`${placed} zugeordnet`);
+  if (inbox) parts.push(`${inbox} im Eingang`);
+  if (failed) parts.push(`${failed} fehlgeschlagen`);
+  // Die Zahl beantwortet nebenbei, ob das Handy den Ort überhaupt mitliefert.
+  $('#uploadStatus').textContent =
+    `${parts.join(', ') || 'nichts geändert'} · ${located} von ${files.length} hatten einen Ort`;
+  $('#uploadClose').hidden = false;
+
+  await load();
+  await loadInbox();
+});
+
+$('#uploadClose').onclick = () => $('#uploadDlg').close();
+
 /* ------------------------------------------------------------ Eingang --- */
 
 // Fotos, die der Kurzbefehl nicht sicher zuordnen konnte. Normalerweise ist
@@ -898,6 +978,7 @@ list.addEventListener('pointerdown', touch);
 function applyRole() {
   document.body.classList.toggle('guest', !canWrite);
   $('#addPass').hidden = !canWrite;
+  $('#bulkPhotos').hidden = !canWrite;
   $('#guestHint').hidden = canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
