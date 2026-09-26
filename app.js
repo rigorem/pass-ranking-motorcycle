@@ -119,11 +119,14 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function score(p, key) {
-  if (key === 'fun') return p.fun ?? null;
-  if (key === 'amb') return p.amb ?? null;
-  const v = [p.fun, p.amb].filter(x => typeof x === 'number');
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+// Die Rangfolge: zuerst zählt Fahrspaß, und zwar immer – Ambiente entscheidet
+// nur zwischen Pässen mit gleichem Fahrspaß. Eine fehlende Bewertung zählt
+// unter jeder vorhandenen.
+const val = v => (typeof v === 'number' ? v : -1);
+const rated = p => typeof p.fun === 'number' || typeof p.amb === 'number';
+
+function byRank(a, b) {
+  return val(b.fun) - val(a.fun) || val(b.amb) - val(a.amb) || (a.order ?? 0) - (b.order ?? 0);
 }
 
 /* ------------------------------------------------------ Login-Schranke --- */
@@ -197,14 +200,8 @@ function render(changed = EMPTY) {
   if (document.activeElement && document.activeElement.classList.contains('note')) { pendingRender = true; return; }
   pendingRender = false;
 
-  // Gerankt wird nach dem Mittel aus Fahrspaß und Ambiente; Unbewertete ans Ende.
-  const sorted = passes.slice().sort((a, b) => {
-    const sa = score(a, 'total'), sb = score(b, 'total');
-    if (sa == null && sb == null) return (a.order ?? 0) - (b.order ?? 0);
-    if (sa == null) return 1;
-    if (sb == null) return -1;
-    return sb - sa || (a.order ?? 0) - (b.order ?? 0);
-  });
+  // Fahrspaß vor Ambiente, dann die Reihenfolge des Eintragens; Unbewertete ans Ende.
+  const sorted = passes.slice().sort(byRank);
 
   $('#count').textContent = passes.length === 1 ? '1 Pass gefahren' : passes.length + ' Pässe gefahren';
 
@@ -218,7 +215,8 @@ function render(changed = EMPTY) {
 
   let rank = 0, last;
   list.innerHTML = sorted.map((p, i) => {
-    const s = score(p, 'total');
+    // Einen Platz teilen sich nur Pässe mit gleichem Fahrspaß und gleichem Ambiente.
+    const s = rated(p) ? `${val(p.fun)}/${val(p.amb)}` : null;
     if (s !== last) { rank = i + 1; last = s; }
     const rankTxt = s == null ? '–' : rank;
     const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
@@ -1367,8 +1365,8 @@ function applyRole() {
   $('#bulkPhotos').hidden = !canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
-    ? 'Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
-    : 'Bewertet nach Fahrspaß und Ambiente.';
+    ? 'Gerankt nach Fahrspaß, bei Gleichstand nach Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
+    : 'Gerankt nach Fahrspaß, bei Gleichstand nach Ambiente.';
 }
 
 (async () => {
