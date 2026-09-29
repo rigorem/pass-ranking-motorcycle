@@ -44,10 +44,23 @@ function esc(s) {
  * @param tileUrl (z, x, y) => URL der Kachel
  * @param stroke  Farbe der Linie
  */
-export async function renderMap({ points, centre, width, height, tileUrl, stroke = '#C94F83' }) {
-  const hasRoute = Array.isArray(points) && points.length > 1;
-  const frame = hasRoute ? points : [centre];
-  const zoom = hasRoute ? fitZoom(frame, width, height, 0.08) : 12;
+/**
+ * Zeichnet eine Karte mit beliebig vielen Strecken und Markierungen.
+ *
+ * @param routes   Liste von Punktlisten – eine Passstraße je Eintrag
+ * @param markers  [{ lat, lon, kind, id }] – kind 'pass' oder 'photo'
+ * @param centre   Rückfall, wenn es weder Strecken noch Markierungen gibt
+ * @returns { svg, marks } – marks trägt zu jeder Markierung die Bildposition,
+ *          damit die Oberfläche anklickbare Punkte darüberlegen kann.
+ */
+export async function renderMap({ routes, points, centre, markers, width, height, tileUrl, stroke = '#C94F83' }) {
+  // `points` ist die alte Einzelstrecken-Schreibweise und bleibt erlaubt.
+  const lines = (routes || (points ? [points] : [])).filter(r => Array.isArray(r) && r.length > 1);
+  const pins = markers || (centre ? [{ ...centre, kind: 'pass' }] : []);
+
+  const frame = [...lines.flat(), ...pins];
+  if (!frame.length && centre) frame.push(centre);
+  const zoom = frame.length > 1 ? fitZoom(frame, width, height, 0.08) : 12;
 
   // Bildausschnitt um die Mitte der Strecke legen.
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -96,28 +109,43 @@ export async function renderMap({ points, centre, width, height, tileUrl, stroke
     `<image xlink:href="${t.href}" x="${(t.tx * TILE - originX).toFixed(2)}" y="${(t.ty * TILE - originY).toFixed(2)}" width="${TILE}" height="${TILE}"/>`
   ).join('');
 
-  let route = '';
-  if (hasRoute) {
-    const d = points.map((p, i) => {
+  // Bei vielen Strecken dünner zeichnen, sonst wird die Übersicht ein Knäuel.
+  const many = lines.length > 1;
+  const wide = many ? 5 : 7, thin = many ? 2.6 : 4;
+
+  const route = lines.map(line => {
+    const d = line.map((p, i) => {
       const q = project(p.lat, p.lon, zoom);
       return `${i ? 'L' : 'M'}${(q.x - originX).toFixed(1)},${(q.y - originY).toFixed(1)}`;
     }).join('');
     // Weiße Fassung darunter, sonst verschwindet die Linie über einer Straße
     // derselben Farbe.
-    route = `<path d="${d}" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-opacity=".85" stroke-linejoin="round" stroke-linecap="round"/>`
-      + `<path d="${d}" fill="none" stroke="${esc(stroke)}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`;
-  }
+    return `<path d="${d}" fill="none" stroke="#FFFFFF" stroke-width="${wide}" stroke-opacity=".85" stroke-linejoin="round" stroke-linecap="round"/>`
+      + `<path d="${d}" fill="none" stroke="${esc(stroke)}" stroke-width="${thin}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join('');
 
-  const c = project(centre.lat, centre.lon, zoom);
-  const marker = `<circle cx="${(c.x - originX).toFixed(1)}" cy="${(c.y - originY).toFixed(1)}" r="5.5" fill="${esc(stroke)}" stroke="#FFFFFF" stroke-width="2.5"/>`;
+  // Markierungen zeichnen und gleichzeitig ihre Bildposition festhalten.
+  const marks = [];
+  const marker = pins.map(m => {
+    const q = project(m.lat, m.lon, zoom);
+    const x = q.x - originX, y = q.y - originY;
+    marks.push({ ...m, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+    if (x < -20 || y < -20 || x > width + 20 || y > height + 20) return '';
+    return m.kind === 'photo'
+      // Fotos als helle Punkte mit dunklem Rand – deutlich anders als die Pässe.
+      ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" fill="#FFFFFF" stroke="#1A2531" stroke-width="2"/>`
+      : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${esc(stroke)}" stroke="#FFFFFF" stroke-width="2.5"/>`;
+  }).join('');
 
   const credit = '© MapTiler © OpenStreetMap';
   const creditWidth = credit.length * 5.4 + 10;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
     + `<rect width="${width}" height="${height}" fill="#E4E9EE"/>`
     + images + route + marker
     + `<g><rect x="${width - creditWidth - 3}" y="${height - 16}" width="${creditWidth}" height="13" rx="3" fill="#FFFFFF" fill-opacity=".72"/>`
     + `<text x="${width - 8}" y="${height - 6}" text-anchor="end" font-family="system-ui,sans-serif" font-size="9" fill="#33414F">${credit}</text></g>`
     + `</svg>`;
+
+  return { svg, marks };
 }

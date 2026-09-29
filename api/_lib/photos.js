@@ -48,6 +48,7 @@ export function contentType(req) {
 // einmal ankam – der Kurzbefehl weiß das von sich aus nicht.
 export const hashKey = sha => 'photohash:' + sha;   // Bytes -> Foto-Id
 export const shaKey = id => 'photosha:' + id;       // Foto-Id -> Bytes
+export const locKey = id => 'photoloc:' + id;       // Foto-Id -> Aufnahmeort
 
 export function fingerprint(data) {
   return crypto.createHash('sha256').update(data).digest('hex');

@@ -1,7 +1,7 @@
 import { guardUpload } from './_lib/auth.js';
 import { redis, listPasses, appendPhotos } from './_lib/store.js';
 import { metersBetween } from './_lib/route.js';
-import { ALLOWED, readBody, contentType, storePhoto, fingerprint, knownPhoto } from './_lib/photos.js';
+import { ALLOWED, readBody, contentType, storePhoto, fingerprint, knownPhoto, locKey } from './_lib/photos.js';
 import { inboxKey, bumpInboxRev } from './_lib/inbox.js';
 
 // Nimmt ein Foto vom Kurzbefehl auf dem Handy entgegen: Bild im Rumpf,
@@ -65,6 +65,12 @@ export default async function handler(req, res) {
     }
 
     const id = await storePhoto(data, type, sha);
+
+    // Den Aufnahmeort behalten, auch wenn das Foto gleich einem Pass zugeordnet
+    // wird: die Übersichtskarte zeigt später jedes Foto dort, wo es entstand.
+    if (lat !== null && lon !== null) {
+      try { await redis.set(locKey(id), JSON.stringify({ lat, lon, taken })); } catch { /* nicht schlimm */ }
+    }
 
     // Zuordnen, wenn ein Pass nah genug liegt.
     if (lat !== null && lon !== null) {

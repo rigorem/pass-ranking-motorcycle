@@ -1,5 +1,6 @@
 import { guard, guardWrite } from '../_lib/auth.js';
 import { patchPass, deletePass, redis, photoKey } from '../_lib/store.js';
+import { locKey } from '../_lib/photos.js';
 import { del as deleteBlob } from '@vercel/blob';
 
 const NUM = new Set(['fun', 'amb', 'alt', 'lat', 'lon']);
@@ -59,6 +60,7 @@ export default async function handler(req, res) {
           const url = await redis.get(photoKey(photoId));
           if (url) await deleteBlob(String(url));
           await redis.del(photoKey(photoId));
+          await redis.del(locKey(photoId));
         } catch { /* ein verwaistes Foto ist kein Grund, das Löschen abzubrechen */ }
       }
       return res.status(200).json({ deleted: id });

@@ -394,7 +394,38 @@ Während ein Dialog offen ist, jemand eine Notiz tippt oder eigene Änderungen
 noch unterwegs sind, wird nicht abgeglichen – sonst überschreibt der Server,
 was gerade erst lokal passiert ist.
 
+## Alle Strecken auf einer Karte
+
+Der Knopf **„Alle Strecken"** über der Liste öffnet eine Karte mit allem, was
+gefahren wurde: jede bekannte Passstraße als Linie, jeder Pass als farbiger
+Punkt, dazu jedes Foto als heller Punkt **an der Stelle, an der es aufgenommen
+wurde**. Ein Tipp auf einen Fotopunkt öffnet das Bild, ein Tipp auf einen
+Passpunkt dessen Streckenansicht.
+
+Gebaut wird die Übersicht nur aus dem, was schon gespeichert ist. Für zwanzig
+Pässe Overpass zu befragen würde jede Laufzeit sprengen – wessen Straßenverlauf
+noch fehlt, erscheint vorerst als Punkt und ergänzt sich, sobald jemand die
+Einzelansicht dieses Passes geöffnet hat.
+
+Das Bild liefert `/api/map/all`, die Punkte dazu `/api/map/all?meta=1` in
+Bildkoordinaten; die Oberfläche legt daraus unsichtbare Schaltflächen über das
+Bild und rechnet in Prozent um, damit sie bei jeder Darstellungsgröße sitzen.
+Zwischengespeichert wird das Ergebnis am Änderungszähler `passes:rev` – ändert
+sich nichts, kostet ein Öffnen nichts.
+
+Aufnahmeorte stehen unter `photoloc:<id>`; sie werden beim Import mitgeschrieben
+und beim Löschen mit entfernt. Fotos von **vor** dieser Änderung haben keinen
+Ort gespeichert und erscheinen daher nicht auf der Karte – die Koordinate wurde
+damals nur zum Zuordnen benutzt und danach verworfen.
+
 ## Bewertung und Sortierung
+
+**Fahrspaß zählt 70 %, Ambiente 30 %.** Eine großartige Straße durch
+mittelmäßige Gegend steht damit vor einer mittelmäßigen Straße durch
+großartige Gegend – mit dem früheren Mittelwert war es umgekehrt. Ist nur eine
+Achse bewertet, wird auf sie normiert, damit ein Pass mit 10 Fahrspaß und
+fehlendem Ambiente nicht zu Unrecht absinkt. Bei Gleichstand entscheidet
+Ambiente, danach die Reihenfolge des Eintragens.
 
 Beide Achsen gehen von 1 bis 10. Ein erneuter Klick auf den aktuellen Wert setzt
 ihn zurück auf „nicht bewertet“. Die Gesamtwertung ist der Mittelwert der

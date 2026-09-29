@@ -1,6 +1,7 @@
 import { guardWrite } from './_lib/auth.js';
 import { redis, listPasses, appendPhotos, photoKey } from './_lib/store.js';
 import { listInbox, dropInbox, bumpInboxRev } from './_lib/inbox.js';
+import { locKey } from './_lib/photos.js';
 import { nearestPass } from './import.js';
 import { del as deleteBlob } from '@vercel/blob';
 
@@ -45,6 +46,7 @@ export default async function handler(req, res) {
             const path = await redis.get(photoKey(id));
             if (path) await deleteBlob(String(path));
             await redis.del(photoKey(id));
+            await redis.del(locKey(id));
           } catch { /* ein übrig gebliebenes Blob ist kein Grund abzubrechen */ }
         }
         await dropInbox(ids);

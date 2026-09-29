@@ -1,5 +1,6 @@
 import { guard, guardWrite } from '../_lib/auth.js';
 import { redis, photoKey } from '../_lib/store.js';
+import { locKey } from '../_lib/photos.js';
 import { get as getBlob, del as deleteBlob } from '@vercel/blob';
 
 export default async function handler(req, res) {
@@ -42,6 +43,7 @@ export default async function handler(req, res) {
     try {
       await deleteBlob(String(path));
       await redis.del(photoKey(id));
+      await redis.del(locKey(id));
       return res.status(200).json({ deleted: id });
     } catch (e) {
       return res.status(500).json({ error: 'delete_failed', detail: String(e.message || e) });

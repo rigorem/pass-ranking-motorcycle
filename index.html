@@ -29,10 +29,13 @@
       </div>
     </div>
     <h1>Pässe&shy;ranking</h1>
-    <p id="intro">Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.</p>
+    <p id="intro">Bewertet nach Fahrspaß und Ambiente, gewichtet 70 zu 30. Tippe auf die Balken, um von 1 bis 10 zu bewerten.</p>
   </header>
 
-  <p class="count" id="count"></p>
+  <div class="bar">
+    <p class="count" id="count"></p>
+    <button type="button" class="text-btn" id="openAllMap">Alle Strecken</button>
+  </div>
 
 
   <section class="inbox" id="inbox" hidden>
@@ -120,9 +123,26 @@
     <h3 class="map-title" id="mapTitle"></h3>
     <button type="button" class="text-btn strong" id="mapClose">Fertig</button>
   </div>
-  <img id="mapImg" alt="">
+  <div class="map-stage">
+    <img id="mapImg" alt="">
+    <div class="spinner" id="mapSpin" hidden><span></span>Karte wird gebaut …</div>
+  </div>
   <p class="map-fail" id="mapFail" hidden>Für diesen Pass gibt es noch kein Kartenbild.</p>
   <a class="btn wide" id="mapOpen" target="_blank" rel="noopener">In Karten öffnen</a>
+</dialog>
+
+<dialog id="allMapDlg" class="sheet">
+  <div class="sheet-head">
+    <span></span>
+    <h3 class="map-title">Alle Strecken</h3>
+    <button type="button" class="text-btn strong" id="allMapClose">Fertig</button>
+  </div>
+  <div class="map-stage allmap" id="allMapStage">
+    <img id="allMapImg" alt="Karte aller gefahrenen Pässe">
+    <div class="spinner" id="allMapSpin" hidden><span></span>Karte wird gebaut …</div>
+  </div>
+  <p class="map-fail" id="allMapFail" hidden>Noch keine Pässe mit Koordinaten.</p>
+  <p class="map-legend"><b>&#9679;</b> Pass &nbsp; <b class="ph">&#9679;</b> Foto &mdash; tippe auf einen Punkt</p>
 </dialog>
 
 <dialog id="uploadDlg" class="sheet">

@@ -1,3 +1,8 @@
+/* Das hidden-Attribut muss immer gewinnen. Jede Klasse, die display setzt,
+   hebt es sonst auf – daran blieb schon die Ladeanzeige über der fertigen
+   Karte stehen, und dieselbe Falle steckt in mehreren Knöpfen. */
+[hidden]{display:none !important}
+
 /* Pässeranking – angelehnt an die gruppierten Listen von iOS: Systemschrift,
    ruhige Flächen, durchscheinende Leisten, Bewegung nur wo sie etwas erklärt. */
 
@@ -664,3 +669,34 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
   .photos .clip video{width:96px;height:72px}
   .inbox-row .clip video{width:56px;height:56px}
 }
+
+/* Ladeanzeige über einer Karte, die noch gebaut wird */
+.map-stage{position:relative;min-height:120px}
+.map-stage img{display:block;width:100%}
+.spinner{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;
+  background:var(--surface);color:var(--muted,#8a8a8e);
+  font:500 .9rem var(--body,system-ui);text-align:center;padding:16px;
+}
+.spinner span{
+  width:26px;height:26px;border-radius:50%;
+  border:2.5px solid currentColor;border-top-color:transparent;
+  animation:spin 800ms linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .spinner span{animation-duration:2.4s}
+}
+
+/* Übersichtskarte mit anklickbaren Fotopunkten */
+.allmap{overflow:auto;-webkit-overflow-scrolling:touch}
+.allmap img{max-width:none;width:100%;min-width:520px}
+.map-dot{
+  position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;
+  border:0;border-radius:50%;background:transparent;padding:0;cursor:pointer;
+}
+.map-dot:focus-visible{outline:3px solid var(--amb,#c94f83);outline-offset:0}
+.map-legend{margin:10px 16px 0;font-size:.82rem;color:var(--muted,#8a8a8e);text-align:center}
+.map-legend b{color:var(--amb,#c94f83)}
+.map-legend b.ph{color:#fff;-webkit-text-stroke:1px #1a2531}

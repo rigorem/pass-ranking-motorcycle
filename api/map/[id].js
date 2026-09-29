@@ -1,5 +1,6 @@
 import { guard } from '../_lib/auth.js';
-import { getPass, patchPass, redis } from '../_lib/store.js';
+import { getPass, patchPass, listPasses, getRev, redis } from '../_lib/store.js';
+import { locKey, isVideoId } from '../_lib/photos.js';
 import { routeFor, encodePolyline, decodePolyline } from '../_lib/route.js';
 import { renderMap } from '../_lib/tilemap.js';
 import { put, get as getBlob, del as deleteBlob } from '@vercel/blob';
@@ -18,7 +19,9 @@ const STROKE = '#C94F83';
 // schneidet der Ausschnitt die Strecke an den Seiten ab.
 const SIZES = {
   thumb: [280, 280],
-  large: [720, 540]
+  large: [720, 540],
+  // Die Übersicht über alle Pässe braucht mehr Fläche als eine einzelne Strecke.
+  all: [900, 700]
 };
 
 const blobKey = (id, size) => `map:${id}:${size}`;
@@ -86,6 +89,9 @@ export default async function handler(req, res) {
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'id_required' });
+
+  if (id === 'all') return overview(req, res);
+
   const size = SIZES[req.query.size] ? String(req.query.size) : 'thumb';
   const [W, H] = SIZES[size];
 
@@ -126,13 +132,13 @@ export default async function handler(req, res) {
 
   let svg;
   try {
-    svg = await renderMap({
+    ({ svg } = await renderMap({
       points,
       centre: { lat: pass.lat, lon: pass.lon },
       width: W, height: H,
       tileUrl,
       stroke: STROKE
-    });
+    }));
   } catch (e) {
     return fail(502, {
       error: 'map_unavailable',
@@ -162,4 +168,106 @@ export default async function handler(req, res) {
   res.setHeader('X-Map-Kind', used);
   res.setHeader('Cache-Control', 'private, max-age=604800');
   res.status(200).end(data);
+}
+
+// Alle gefahrenen Pässe auf einer Karte: jede bekannte Strecke als Linie, jeder
+// Pass als Punkt, dazu jedes Foto an der Stelle, an der es aufgenommen wurde.
+//
+// Gebaut wird nur aus dem, was schon im Speicher liegt. Für zwanzig Pässe
+// Overpass zu befragen würde jede Zeitgrenze sprengen – wessen Straßenverlauf
+// noch fehlt, erscheint vorerst als Punkt und ergänzt sich, sobald jemand die
+// Einzelansicht dieses Passes geöffnet hat.
+const ALL_KEY = size => `map:all:${size}`;
+
+async function overview(req, res) {
+  const [W, H] = SIZES.all;
+  const wantMeta = req.query.meta === '1';
+
+  let rev = 0;
+  try { rev = await getRev(); } catch { /* dann eben ohne Vergleich */ }
+
+  // Zwischenspeicher gilt nur, solange sich an den Pässen nichts geändert hat.
+  try {
+    const raw = await redis.get(ALL_KEY('all'));
+    const cached = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (cached && cached.rev === rev && cached.path) {
+      if (wantMeta) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json({ w: W, h: H, marks: cached.marks || [] });
+      }
+      if (await send(res, cached.path)) return;
+    }
+  } catch { /* neu bauen */ }
+
+  const fail = (code, body) => {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(code).json(body);
+  };
+  if (!KEY()) return fail(501, { error: 'maps_not_configured' });
+
+  let passes;
+  try { passes = await listPasses(); }
+  catch (e) { return fail(500, { error: 'store_unavailable', detail: String(e.message || e) }); }
+
+  const located = passes.filter(p => typeof p.lat === 'number' && typeof p.lon === 'number');
+  if (!located.length) return fail(404, { error: 'nothing_to_show' });
+
+  const routes = [];
+  const markers = [];
+
+  for (const p of located) {
+    markers.push({ lat: p.lat, lon: p.lon, kind: 'pass', id: p.id, name: p.de });
+    try {
+      const raw = await redis.get(routeKey(p.id));
+      if (raw && raw !== 'none') {
+        const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (v.enc) routes.push(decodePolyline(v.enc));
+      }
+    } catch { /* ohne Linie halt nur der Punkt */ }
+  }
+
+  // Fotos an ihren Aufnahmeort setzen. Videos haben keinen.
+  for (const p of passes) {
+    for (const photoId of p.photos || []) {
+      if (isVideoId(photoId)) continue;
+      try {
+        const raw = await redis.get(locKey(photoId));
+        if (!raw) continue;
+        const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (typeof v.lat === 'number' && typeof v.lon === 'number') {
+          markers.push({ lat: v.lat, lon: v.lon, kind: 'photo', id: photoId, pass: p.id, name: p.de });
+        }
+      } catch { /* dieses Foto eben ohne Punkt */ }
+    }
+  }
+
+  let built;
+  try {
+    built = await renderMap({ routes, markers, width: W, height: H, tileUrl, stroke: STROKE });
+  } catch (e) {
+    return fail(502, { error: 'map_unavailable', detail: String(e.message || e) });
+  }
+
+  const data = Buffer.from(built.svg, 'utf8');
+  try {
+    const blob = await put(`maps/all.svg`, data, {
+      access: 'private', addRandomSuffix: true, contentType: 'image/svg+xml', allowOverwrite: true
+    });
+    const old = await redis.get(ALL_KEY('all'));
+    await redis.set(ALL_KEY('all'), JSON.stringify({ rev, path: blob.pathname, marks: built.marks }));
+    // Das vorherige Bild wegräumen, sonst sammeln sich die alten Stände an.
+    try {
+      const prev = typeof old === 'string' ? JSON.parse(old) : old;
+      if (prev && prev.path && prev.path !== blob.pathname) await deleteBlob(String(prev.path));
+    } catch { /* egal */ }
+  } catch { /* dann eben beim nächsten Mal wieder bauen */ }
+
+  if (wantMeta) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ w: W, h: H, marks: built.marks });
+  }
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Content-Length', String(data.length));
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  return res.status(200).end(data);
 }

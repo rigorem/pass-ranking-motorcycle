@@ -1,6 +1,6 @@
 import { guardWrite } from './_lib/auth.js';
 import { redis, listPasses, patchPass, photoKey } from './_lib/store.js';
-import { shaKey, hashKey, isVideoId } from './_lib/photos.js';
+import { shaKey, hashKey, isVideoId, locKey } from './_lib/photos.js';
 import { listInbox, dropInbox, bumpInboxRev } from './_lib/inbox.js';
 import { get as getBlob, del as deleteBlob } from '@vercel/blob';
 
@@ -45,6 +45,7 @@ async function forget(id) {
       if (String(owner) === id) await redis.del(hashKey(String(sha)));
     }
     await redis.del(shaKey(id));
+    await redis.del(locKey(id));
   } catch { /* ein übrig gebliebenes Blob ist kein Grund abzubrechen */ }
 }
 

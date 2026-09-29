@@ -119,11 +119,19 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function score(p, key) {
-  if (key === 'fun') return p.fun ?? null;
-  if (key === 'amb') return p.amb ?? null;
-  const v = [p.fun, p.amb].filter(x => typeof x === 'number');
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+// Fahrspaß wiegt schwerer als Ambiente: eine großartige Straße durch mittelmäßige
+// Gegend soll vor einer mittelmäßigen Straße durch großartige Gegend stehen.
+const FUN_WEIGHT = 0.7, AMB_WEIGHT = 0.3;
+
+function score(p) {
+  const parts = [];
+  if (typeof p.fun === 'number') parts.push([p.fun, FUN_WEIGHT]);
+  if (typeof p.amb === 'number') parts.push([p.amb, AMB_WEIGHT]);
+  if (!parts.length) return null;
+  // Ist nur eine Achse bewertet, wird auf sie normiert – sonst würde ein Pass
+  // mit 10 Fahrspaß und fehlendem Ambiente bei 7 landen und zu Unrecht sinken.
+  const weight = parts.reduce((sum, [, w]) => sum + w, 0);
+  return parts.reduce((sum, [v, w]) => sum + v * w, 0) / weight;
 }
 
 /* ------------------------------------------------------ Login-Schranke --- */
@@ -197,13 +205,16 @@ function render(changed = EMPTY) {
   if (document.activeElement && document.activeElement.classList.contains('note')) { pendingRender = true; return; }
   pendingRender = false;
 
-  // Gerankt wird nach dem Mittel aus Fahrspaß und Ambiente; Unbewertete ans Ende.
+  // Gerankt wird nach Fahrspaß (70 %) und Ambiente (30 %); Unbewertete ans Ende.
+  // Bei Gleichstand entscheidet Ambiente, dann die Reihenfolge des Eintragens.
   const sorted = passes.slice().sort((a, b) => {
-    const sa = score(a, 'total'), sb = score(b, 'total');
+    const sa = score(a), sb = score(b);
     if (sa == null && sb == null) return (a.order ?? 0) - (b.order ?? 0);
     if (sa == null) return 1;
     if (sb == null) return -1;
-    return sb - sa || (a.order ?? 0) - (b.order ?? 0);
+    return sb - sa
+      || (b.amb ?? -1) - (a.amb ?? -1)
+      || (a.order ?? 0) - (b.order ?? 0);
   });
 
   $('#count').textContent = passes.length === 1 ? '1 Pass gefahren' : passes.length + ' Pässe gefahren';
@@ -218,7 +229,7 @@ function render(changed = EMPTY) {
 
   let rank = 0, last;
   list.innerHTML = sorted.map((p, i) => {
-    const s = score(p, 'total');
+    const s = score(p);
     if (s !== last) { rank = i + 1; last = s; }
     const rankTxt = s == null ? '–' : rank;
     const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
@@ -760,12 +771,104 @@ function openMap(p) {
   fail.hidden = true;
   img.hidden = false;
   img.alt = 'Straßenverlauf über den ' + p.de;
-  img.onerror = () => { img.hidden = true; fail.hidden = false; };
+
+  // Beim ersten Mal wird der Straßenverlauf geholt und das Bild gebaut – das
+  // dauert. Ohne Anzeige sieht die Karte dabei einfach kaputt aus.
+  const spin = $('#mapSpin');
+  spin.hidden = false;
+  img.style.visibility = 'hidden';
+  const done = () => { spin.hidden = true; img.style.visibility = ''; };
+  img.onload = done;
+  img.onerror = () => { done(); img.hidden = true; fail.hidden = false; };
+
   img.src = `/api/map/${encodeURIComponent(p.id)}?size=large&v=${MAP_VERSION}`;
   $('#mapTitle').textContent = p.alt ? `${p.de} · ${p.alt} m` : p.de;
   $('#mapOpen').href = mapsUrl(p);
   $('#mapDlg').showModal();
 }
+
+/* ------------------------------------------------------ Alle Strecken --- */
+
+// Eine Karte mit allen gefahrenen Pässen: Strecken als Linien, Pässe als
+// Punkte, Fotos dort, wo sie aufgenommen wurden. Die Punkte liegen als
+// unsichtbare Schaltflächen über dem Bild – das Bild selbst bleibt ein
+// gewöhnliches <img>, das der Server fertig ausliefert.
+async function openAllMap() {
+  const dlg = $('#allMapDlg');
+  const img = $('#allMapImg');
+  const spin = $('#allMapSpin');
+  const fail = $('#allMapFail');
+  const stage = $('#allMapStage');
+
+  stage.querySelectorAll('.map-dot').forEach(d => d.remove());
+  fail.hidden = true;
+  img.hidden = false;
+  spin.hidden = false;
+  img.style.visibility = 'hidden';
+  dlg.showModal();
+
+  let meta = null;
+  try {
+    meta = await req('/api/map/all?meta=1');
+  } catch (err) {
+    spin.hidden = true;
+    img.hidden = true;
+    fail.hidden = false;
+    fail.textContent = err.code === 'nothing_to_show'
+      ? 'Noch keine Pässe mit Koordinaten.'
+      : message(err);
+    return;
+  }
+
+  img.onload = () => {
+    spin.hidden = true;
+    img.style.visibility = '';
+    placeDots(stage, img, meta);
+  };
+  img.onerror = () => { spin.hidden = true; img.hidden = true; fail.hidden = false; };
+  img.src = '/api/map/all?v=' + MAP_VERSION;
+}
+
+// Die Punkte kommen in Bildkoordinaten; das Bild wird aber skaliert
+// dargestellt. Deshalb in Prozent umrechnen – dann sitzen sie bei jeder Größe.
+function placeDots(stage, img, meta) {
+  stage.querySelectorAll('.map-dot').forEach(d => d.remove());
+  if (!meta || !Array.isArray(meta.marks)) return;
+
+  for (const m of meta.marks) {
+    if (m.x < 0 || m.y < 0 || m.x > meta.w || m.y > meta.h) continue;
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'map-dot';
+    dot.style.left = (m.x / meta.w * 100) + '%';
+    dot.style.top = (m.y / meta.h * 100) + '%';
+    dot.setAttribute('aria-label', m.kind === 'photo'
+      ? `Foto vom ${m.name || 'Pass'} ansehen`
+      : (m.name || 'Pass'));
+    dot.dataset.kind = m.kind;
+    dot.dataset.id = m.id || '';
+    dot.dataset.pass = m.pass || m.id || '';
+    stage.append(dot);
+  }
+}
+
+$('#allMapStage').addEventListener('click', e => {
+  const dot = e.target.closest('.map-dot');
+  if (!dot) return;
+  if (dot.dataset.kind === 'photo') {
+    $('#allMapDlg').close();
+    openLightbox(dot.dataset.pass, dot.dataset.id);
+  } else {
+    // Auf einen Pass getippt: seine Einzelstrecke zeigen.
+    const p = passes.find(x => x.id === dot.dataset.id);
+    if (!p) return;
+    $('#allMapDlg').close();
+    openMap(p);
+  }
+});
+
+$('#openAllMap').onclick = openAllMap;
+$('#allMapClose').onclick = () => $('#allMapDlg').close();
 
 $('#mapClose').onclick = () => $('#mapDlg').close();
 $('#mapDlg').addEventListener('click', e => { if (e.target.id === 'mapDlg') $('#mapDlg').close(); });
@@ -1367,8 +1470,8 @@ function applyRole() {
   $('#bulkPhotos').hidden = !canWrite;
   if (!canWrite) { inboxItems = []; $('#inbox').hidden = true; }
   $('#intro').textContent = canWrite
-    ? 'Bewertet nach Fahrspaß und Ambiente. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
-    : 'Bewertet nach Fahrspaß und Ambiente.';
+    ? 'Bewertet nach Fahrspaß und Ambiente, gewichtet 70 zu 30. Tippe auf die Balken, um von 1 bis 10 zu bewerten.'
+    : 'Bewertet nach Fahrspaß und Ambiente, gewichtet 70 zu 30.';
 }
 
 (async () => {
