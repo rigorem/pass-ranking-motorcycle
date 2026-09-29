@@ -420,19 +420,16 @@ damals nur zum Zuordnen benutzt und danach verworfen.
 
 ## Bewertung und Sortierung
 
-**Fahrspaß zählt 70 %, Ambiente 30 %.** Eine großartige Straße durch
-mittelmäßige Gegend steht damit vor einer mittelmäßigen Straße durch
-großartige Gegend – mit dem früheren Mittelwert war es umgekehrt. Ist nur eine
-Achse bewertet, wird auf sie normiert, damit ein Pass mit 10 Fahrspaß und
-fehlendem Ambiente nicht zu Unrecht absinkt. Bei Gleichstand entscheidet
-Ambiente, danach die Reihenfolge des Eintragens.
-
 Beide Achsen gehen von 1 bis 10. Ein erneuter Klick auf den aktuellen Wert setzt
-ihn zurück auf „nicht bewertet“. Die Gesamtwertung ist der Mittelwert der
-vorhandenen Werte – ein Pass mit nur einer Bewertung zählt mit dieser.
-Die Liste steht immer nach dieser Gesamtwertung; eine andere Sortierung gibt es nicht.
-Unbewertete Pässe stehen am Ende und bekommen statt eines Platzes ein „–“,
-sortiert nach `order`. Gleiche Werte teilen sich einen Platz.
+ihn zurück auf „nicht bewertet“.
+
+Gerankt wird **zuerst nach Fahrspaß, immer**: ein Pass mit 9 Fahrspaß steht vor
+jedem mit 8, egal wie das Ambiente ausfällt. Ambiente entscheidet nur zwischen
+Pässen mit gleichem Fahrspaß, danach die Reihenfolge des Eintragens (`order`).
+Eine fehlende Bewertung zählt unter jeder vorhandenen. Einen Platz teilen sich
+nur Pässe mit gleichem Fahrspaß *und* gleichem Ambiente. Ganz unbewertete Pässe
+stehen am Ende und bekommen statt eines Platzes ein „–“. Eine andere
+Sortierung gibt es nicht.
 
 Bewertungen erscheinen sofort und werden im Hintergrund gespeichert;
 schlägt das fehl, springt der Balken zurück und eine Meldung sagt warum.
