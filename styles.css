@@ -356,6 +356,7 @@ body.guest .inbox{display:none}
 .btn:active{transform:scale(.97)}
 .btn.wide{width:100%;padding:.85rem 1.2rem}
 .btn.danger{background:color-mix(in srgb,var(--danger) 14%,transparent);color:var(--danger)}
+.btn.soft{background:var(--fill-2);color:var(--ink)}
 .btn[disabled]{opacity:.5;cursor:default;transform:none}
 .text-btn{border:0;background:none;padding:6px 4px;color:var(--tint);font-size:1.0625rem;transition:opacity 120ms ease}
 .text-btn.strong{font-weight:600}
@@ -494,14 +495,6 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
 .glass-btn:active{transform:scale(.95)}
 .glass-btn[hidden]{display:none}
 #lbDel{color:#FF6961}
-
-/* Streckenansicht */
-#mapDlg{max-width:min(780px,calc(100vw - 16px))}
-#mapDlg img{display:block;width:calc(100% - 32px);margin:8px 16px 0;max-height:68vh;object-fit:contain;
-  background:var(--fill);border-radius:var(--r-md)}
-#mapDlg img[hidden]{display:none}
-#mapDlg .btn{width:calc(100% - 32px);margin:14px 16px 16px}
-.map-fail{margin:8px 16px 0;padding:40px 20px;text-align:center;color:var(--ink-2);background:var(--fill);border-radius:var(--r-md)}
 
 /* Sammel-Upload mit Fortschritt */
 #uploadDlg{max-width:min(520px,calc(100vw - 24px))}
@@ -670,33 +663,144 @@ dialog.gate h3{margin:0;font-size:1.375rem;font-weight:700;letter-spacing:-.02em
   .inbox-row .clip video{width:56px;height:56px}
 }
 
-/* Ladeanzeige über einer Karte, die noch gebaut wird */
-.map-stage{position:relative;min-height:120px}
-.map-stage img{display:block;width:100%}
-.spinner{
-  position:absolute;inset:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:10px;
-  background:var(--surface);color:var(--muted,#8a8a8e);
-  font:500 .9rem var(--body,system-ui);text-align:center;padding:16px;
+/* ------------------------------------------------------------ Karte --- */
+
+/* Die Karte nimmt den ganzen Bildschirm ein; Kopf, Werkzeuge und Infokarte
+   schweben als Glas darüber. Gezeichnet wird sie von map.js. */
+dialog.mapview{
+  width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;
+  border-radius:0;background:#E9E7E1;overflow:hidden;box-shadow:none;
 }
-.spinner span{
-  width:26px;height:26px;border-radius:50%;
-  border:2.5px solid currentColor;border-top-color:transparent;
+dialog.mapview::backdrop{background:#000}
+.mapview .mv-map{position:absolute;inset:0}
+
+.tm{position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;
+  cursor:grab;background:#E9E7E1}
+.tm.grab{cursor:grabbing}
+.tm-tiles,.tm-marks{position:absolute;inset:0}
+/* Eigene Stapel, damit die z-index-Werte der Kacheln nicht über Strecken
+   und Bedienelemente hinausreichen. */
+.tm{isolation:isolate}
+.tm-tiles{z-index:0;isolation:isolate}
+.tm-tile{position:absolute;left:0;top:0;opacity:0;transition:opacity 220ms ease;
+  will-change:transform;pointer-events:none;image-rendering:auto}
+.tm-tile.on{opacity:1}
+.tm-routes{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.tm-casing,.tm-line{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.tm-casing{stroke:#fff;stroke-opacity:.95}
+.tm-line{stroke:var(--ktm)}
+.tm-casing.dim{stroke-opacity:.5}
+.tm-line.dim{stroke:#1C1C1E;stroke-opacity:.45}
+.tm-line.hot{filter:drop-shadow(0 0 6px rgba(255,102,0,.55))}
+.tm-marks{z-index:4;pointer-events:none}
+.tm-marks > *{pointer-events:auto}
+
+/* Pässe: das braune Passschild, darauf der Platz in der Rangliste. */
+.tm-pass{
+  position:absolute;left:0;top:0;border:0;padding:0;background:none;cursor:pointer;
+  width:0;height:0;will-change:transform;z-index:2;
+}
+.tm-pass span{
+  position:absolute;left:0;bottom:6px;transform:translateX(-50%);
+  min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;
+  display:grid;place-items:center;border-radius:7px;
+  font:800 .8125rem/1 var(--font-round);font-variant-numeric:tabular-nums;
+  background:var(--sign);color:var(--sign-ink);
+  box-shadow:0 0 0 2px #fff,0 3px 10px rgba(0,0,0,.3);
+  transition:transform 200ms var(--ease-out),background-color 200ms ease;
+}
+.tm-pass span::after{
+  content:"";position:absolute;left:50%;bottom:-7px;margin-left:-5px;
+  border:5px solid transparent;border-top:5px solid #fff;border-bottom:0;
+}
+.tm-pass.hot{z-index:4}
+.tm-pass.hot span{background:var(--ktm);color:var(--on-ktm);transform:translateX(-50%) scale(1.22)}
+.tm-pass:focus-visible span{outline:3px solid var(--ktm);outline-offset:2px}
+
+/* Fotos: rund, weiß gerahmt, an ihrem Aufnahmeort. Mehrere als Stapel. */
+.tm-photo{
+  position:absolute;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;
+  border:0;padding:0;border-radius:50%;background:#fff;cursor:zoom-in;
+  box-shadow:0 0 0 2.5px #fff,0 4px 14px rgba(0,0,0,.35);will-change:transform;
+}
+.tm-photo img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;background:#ddd}
+.tm-photo b{
+  position:absolute;right:-6px;bottom:-4px;min-width:20px;height:20px;padding:0 5px;
+  box-sizing:border-box;border-radius:10px;display:grid;place-items:center;
+  font:700 .6875rem/1 var(--font-round);background:var(--ktm);color:var(--on-ktm);
+  box-shadow:0 0 0 2px #fff;
+}
+.tm-photo:hover,.tm-photo:focus-visible{z-index:3}
+.tm-photo:focus-visible{outline:3px solid var(--ktm);outline-offset:2px}
+
+/* Kopf, Werkzeuge, Ladeanzeige und Infokarte schweben über der Karte. */
+.mv-top{
+  position:absolute;z-index:10;left:0;right:0;top:0;display:flex;align-items:flex-start;gap:12px;
+  padding:calc(env(safe-area-inset-top) + 12px) calc(env(safe-area-inset-right) + 16px) 0 calc(env(safe-area-inset-left) + 16px);
+  pointer-events:none;
+}
+.mv-top > *{pointer-events:auto}
+.mv-head{
+  flex:1;min-width:0;max-width:420px;padding:10px 16px;border-radius:18px;color:#fff;
+  background:rgba(28,28,30,.62);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:0 6px 24px rgba(0,0,0,.18);
+}
+.mv-head h3{margin:0;font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mv-head p{margin:2px 0 0;font-size:.8125rem;color:rgba(255,255,255,.72);font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mv-head p:empty{display:none}
+.mv-top .glass-btn{padding:.6rem 1.1rem;margin-top:4px}
+
+.mv-tools{
+  position:absolute;z-index:10;right:calc(env(safe-area-inset-right) + 16px);top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:8px;
+}
+.glass-btn.round{width:44px;height:44px;padding:0;display:grid;place-items:center}
+.glass-btn.round svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.mv-status{
+  position:absolute;z-index:10;left:50%;top:calc(env(safe-area-inset-top) + 84px);transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;padding:9px 16px;border-radius:999px;color:#fff;
+  font-size:.875rem;font-weight:600;white-space:nowrap;
+  background:rgba(28,28,30,.72);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);
+}
+.mv-spin{
+  width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:#fff;
   animation:spin 800ms linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){
-  .spinner span{animation-duration:2.4s}
+
+.mv-card{
+  position:absolute;z-index:10;left:50%;bottom:calc(env(safe-area-inset-bottom) + 16px);
+  width:min(440px,calc(100vw - 32px));transform:translateX(-50%);box-sizing:border-box;
+  padding:16px;border-radius:var(--r-card);color:var(--ink);
+  background:var(--material);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
+  box-shadow:var(--shadow-lg),0 0 0 .5px var(--sep);
+  animation:card-in 320ms var(--ease-drawer);
+}
+@keyframes card-in{from{opacity:0;transform:translate(-50%,24px)}}
+.mv-card header{display:flex;gap:12px;align-items:flex-start}
+.mv-card .rank{flex:none}
+.mv-card h4{margin:0;font-size:1.1875rem;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.mv-card .intl{white-space:normal}
+.mv-card .facts{margin:10px 0 0}
+.mv-scores{display:flex;gap:18px;margin:12px 0 0;font-size:.875rem;color:var(--ink-2)}
+.mv-scores b{font:700 1.0625rem/1 var(--font-round);color:var(--ink);margin-left:4px;font-variant-numeric:tabular-nums}
+.mv-scores .fun b{color:var(--tint)}
+.mv-card .row{display:flex;gap:8px;margin-top:14px}
+.mv-card .row .btn{flex:1;margin:0}
+.mv-card .x{
+  margin-left:auto;flex:none;width:30px;height:30px;border:0;border-radius:50%;padding:0;
+  background:var(--fill);color:var(--ink-2);font-size:1.1rem;line-height:1;cursor:pointer;
 }
 
-/* Übersichtskarte mit anklickbaren Fotopunkten */
-.allmap{overflow:auto;-webkit-overflow-scrolling:touch}
-.allmap img{max-width:none;width:100%;min-width:520px}
-.map-dot{
-  position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;
-  border:0;border-radius:50%;background:transparent;padding:0;cursor:pointer;
+@media (prefers-reduced-motion:reduce){
+  .mv-spin{animation-duration:2.4s !important}
+  .tm-tile{transition:none}
+  .mv-card{animation:none}
 }
-.map-dot:focus-visible{outline:3px solid var(--amb,#c94f83);outline-offset:0}
-.map-legend{margin:10px 16px 0;font-size:.82rem;color:var(--muted,#8a8a8e);text-align:center}
-.map-legend b{color:var(--amb,#c94f83)}
-.map-legend b.ph{color:#fff;-webkit-text-stroke:1px #1a2531}
+@media (prefers-reduced-transparency:reduce){
+  .mv-head,.mv-status{-webkit-backdrop-filter:none;backdrop-filter:none;background:#1C1C1E}
+  .mv-card{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface)}
+}

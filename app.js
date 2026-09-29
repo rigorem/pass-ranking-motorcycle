@@ -1,6 +1,7 @@
 // Pässeranking – Frontend. Spricht ausschließlich mit den eigenen /api-Routen.
 
 import { readExif } from '/exif.js';
+import { createMap, decodePolyline } from '/map.js';
 import { upload as blobUpload } from '/vendor/blob-client.js';
 
 // Videos sind zu groß für den Rumpf einer Vercel-Funktion (4,5 MB). Sie gehen
@@ -129,6 +130,19 @@ function byRank(a, b) {
   return val(b.fun) - val(a.fun) || val(b.amb) - val(a.amb) || (a.order ?? 0) - (b.order ?? 0);
 }
 
+// Platz je Pass. Einen Platz teilen sich nur Pässe mit gleichem Fahrspaß und
+// gleichem Ambiente; Unbewertete haben keinen.
+function ranks(sorted) {
+  const out = new Map();
+  let rank = 0, last;
+  sorted.forEach((p, i) => {
+    const s = rated(p) ? `${val(p.fun)}/${val(p.amb)}` : null;
+    if (s !== last) { rank = i + 1; last = s; }
+    out.set(p.id, s == null ? null : rank);
+  });
+  return out;
+}
+
 /* ------------------------------------------------------ Login-Schranke --- */
 
 let loginResolve = null;
@@ -213,12 +227,10 @@ function render(changed = EMPTY) {
   const before = positions();
   const first = !list.querySelector('.pass');
 
-  let rank = 0, last;
+  const place = ranks(sorted);
   list.innerHTML = sorted.map((p, i) => {
-    // Einen Platz teilen sich nur Pässe mit gleichem Fahrspaß und gleichem Ambiente.
-    const s = rated(p) ? `${val(p.fun)}/${val(p.amb)}` : null;
-    if (s !== last) { rank = i + 1; last = s; }
-    const rankTxt = s == null ? '–' : rank;
+    const rank = place.get(p.id);
+    const rankTxt = rank == null ? '–' : rank;
     const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
     const photos = (p.photos || []).map(id => isVideo(id)
       // preload="metadata" holt nur das erste Bild, nicht das ganze Video.
@@ -229,7 +241,7 @@ function render(changed = EMPTY) {
          </span>`
       : `<img src="/api/photos/${encodeURIComponent(id)}" alt="Foto vom ${esc(p.de)}" loading="lazy" data-photo="${esc(id)}" data-pass="${esc(p.id)}">`
     ).join('');
-    return `<li class="pass${s != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}" style="--n:${i}">
+    return `<li class="pass${rank != null && rank <= 3 ? ' top' : ''}${changed.has(p.id) ? ' fresh' : ''}" data-id="${esc(p.id)}" style="--n:${i}">
       <div class="head">
         <div class="thumb">
           ${cover(p)}
@@ -261,6 +273,10 @@ function render(changed = EMPTY) {
   } else {
     glide(before);
   }
+
+  // Bewertet der andere gerade, während die Karte offen ist, ziehen die
+  // Platznummern auf der Karte mit.
+  if ($('#mapView').open) drawMap();
 }
 
 const ICON_CAMERA = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
@@ -749,116 +765,240 @@ $('#suggest').addEventListener('pointerdown', e => {
 
 $('#editForm').de.addEventListener('blur', () => setTimeout(hideSuggestions, 120));
 
-// Zeigt die Passstraße mit ihren Kehren. Das Bild kommt von /api/map und
-// wird dort einmal gebaut; hier ist nur der Rahmen drumherum.
+/* ------------------------------------------------------------ Karte --- */
+
+// Eine Karte für alles: alle Strecken auf einmal oder ein Pass im Mittelpunkt.
+// Sie öffnet sofort mit dem, was die Seite schon weiß – Pässe mit ihren
+// Koordinaten –, und zeichnet Straßen und Fotos nach, sobald sie da sind.
+// Die Grundkarte kommt als Kacheln, die nach dem ersten Abruf im CDN liegen.
+let map = null;
+let mapPhotos = [];            // Fotos mit Aufnahmeort, von /api/map/all
+let mapLoaded = false;
+let mapToken = 0;              // verwirft Antworten, die nach dem Schließen kommen
+let mapFocus = null;           // Id des Passes auf der Infokarte
+const routeCache = new Map();  // Pass-Id -> Punkte der Straße
+
+function ensureMap() {
+  if (map) return map;
+  map = createMap($('#mvMap'), {
+    // 512er-Kacheln, auf Retina-Displays doppelt aufgelöst.
+    tileUrl: (z, x, y) => `/api/map/tile?z=${z}&x=${x}&y=${y}${devicePixelRatio >= 1.5 ? '&r=2' : ''}`,
+    tileSize: 512,
+    tileZoom: [5, 16],
+    photoUrl: id => '/api/photos/' + encodeURIComponent(id)
+  });
+  map.on('pass', id => focusPass(passes.find(p => p.id === id), { animate: true }));
+  // Ein Tipp auf ein Foto öffnet die ganze Reihe seines Passes, beim Foto.
+  map.on('photos', items => openLightbox(items[0].pass, items[0].id));
+  map.on('blank', () => { if (mapFocus) unfocus(); });
+  return map;
+}
+
+const onMap = () => passes.filter(hasPlace);
+
+function drawMap() {
+  if (!map) return;
+  const place = ranks(passes.slice().sort(byRank));
+  const known = new Set(passes.map(p => p.id));
+  map.setRoutes([...routeCache].filter(([id]) => known.has(id)).map(([id, points]) => ({ id, points })));
+  // Der Beste zuletzt, damit sein Schild obenauf liegt, wo sich Pässe drängen.
+  map.setPasses(onMap()
+    .map(p => ({ id: p.id, lat: p.lat, lon: p.lon, label: p.de, rank: place.get(p.id) ?? '–', r: place.get(p.id) ?? 1e9 }))
+    .sort((a, b) => b.r - a.r));
+  map.setPhotos(mapPhotos.filter(ph => known.has(ph.pass)));
+  map.setActive(mapFocus);
+}
+
+// Alles, was drauf ist, in den Ausschnitt holen.
+function fitAll(animate) {
+  const pts = onMap().map(p => ({ lat: p.lat, lon: p.lon }));
+  for (const [, route] of routeCache) pts.push(...route);
+  if (pts.length) map.fit(pts, { animate, ...insets() });
+}
+
+// Was über der Karte schwebt, als freizuhaltender Rand.
+function insets() {
+  const card = $('#mvCard');
+  return {
+    top: $('.mv-top').offsetHeight,
+    right: $('.mv-tools').offsetWidth + 16,
+    bottom: card.hidden ? 0 : card.offsetHeight + 16
+  };
+}
+
+function mapSummary() {
+  const list = onMap();
+  const km = list.reduce((s, p) => s + (Number(p.km) || 0), 0);
+  const curves = list.reduce((s, p) => s + (Number(p.curves) || 0), 0);
+  const bits = [list.length === 1 ? '1 Pass' : `${list.length} Pässe`];
+  if (km) bits.push(`${Math.round(km).toLocaleString('de-DE')} km`);
+  if (curves) bits.push(`${curves.toLocaleString('de-DE')} Kurven`);
+  if (mapPhotos.length) bits.push(mapPhotos.length === 1 ? '1 Foto' : `${mapPhotos.length} Fotos`);
+  return bits.join(' · ');
+}
+
+function mapStatus(text) {
+  $('#mvStatus').hidden = !text;
+  if (text) $('#mvStatusText').textContent = text;
+}
+
+// Straßen und Fotoorte aller Pässe holen. Das ist eine einzige kleine Antwort
+// aus dem Speicher – kein Bild, das erst gebaut werden müsste.
+async function loadMapData(token) {
+  const data = await req('/api/map/all');
+  if (token !== mapToken) return false;
+  for (const p of data.passes || []) {
+    if (p.enc && !routeCache.has(p.id)) routeCache.set(p.id, decodePolyline(p.enc));
+  }
+  mapPhotos = data.photos || [];
+  mapLoaded = true;
+  drawMap();
+  if (!mapFocus) $('#mvSub').textContent = mapSummary();
+  return true;
+}
+
+function showMapView() {
+  const dlg = $('#mapView');
+  if (!dlg.open) dlg.showModal();
+  ensureMap();
+  map.refresh();
+}
+
+async function openAllMap() {
+  const token = ++mapToken;
+  mapFocus = null;
+  $('#mvCard').hidden = true;
+  $('#mvTitle').textContent = 'Alle Strecken';
+  $('#mvSub').textContent = mapSummary();
+  showMapView();
+  drawMap();
+  fitAll(false);
+
+  if (!onMap().length) { mapStatus('Noch keine Pässe mit Koordinaten.'); return; }
+  const fresh = !mapLoaded;
+  if (fresh) mapStatus('Strecken werden geladen …');
+  try {
+    // Beim zweiten Öffnen steht die Karte schon; aktualisiert wird leise.
+    if (await loadMapData(token) && fresh) fitAll(true);
+  } catch (err) {
+    if (token === mapToken) toast(message(err));
+  } finally {
+    if (token === mapToken) mapStatus(null);
+  }
+}
+
+// Von der Kachel in der Liste: dieselbe Karte, der Pass im Mittelpunkt.
 function openMap(p) {
   if (!p || !hasPlace(p)) return;
-  const img = $('#mapImg');
-  const fail = $('#mapFail');
-  fail.hidden = true;
-  img.hidden = false;
-  img.alt = 'Straßenverlauf über den ' + p.de;
-
-  // Beim ersten Mal wird der Straßenverlauf geholt und das Bild gebaut – das
-  // dauert. Ohne Anzeige sieht die Karte dabei einfach kaputt aus.
-  const spin = $('#mapSpin');
-  spin.hidden = false;
-  img.style.visibility = 'hidden';
-  const done = () => { spin.hidden = true; img.style.visibility = ''; };
-  img.onload = done;
-  img.onerror = () => { done(); img.hidden = true; fail.hidden = false; };
-
-  img.src = `/api/map/${encodeURIComponent(p.id)}?size=large&v=${MAP_VERSION}`;
-  $('#mapTitle').textContent = p.alt ? `${p.de} · ${p.alt} m` : p.de;
-  $('#mapOpen').href = mapsUrl(p);
-  $('#mapDlg').showModal();
+  const token = ++mapToken;
+  showMapView();
+  focusPass(p, { animate: false });
+  if (!mapLoaded) loadMapData(token).catch(() => { /* Die Strecke selbst kommt ohnehin */ });
 }
 
-/* ------------------------------------------------------ Alle Strecken --- */
+async function focusPass(p, { animate }) {
+  if (!p || !map) return;
+  mapFocus = p.id;
+  showCard(p);
+  $('#mvTitle').textContent = p.de;
+  $('#mvSub').textContent = [p.alt ? `${p.alt} m` : '', p.region || ''].filter(Boolean).join(' · ');
+  drawMap();
+  frame(p, animate);
 
-// Eine Karte mit allen gefahrenen Pässen: Strecken als Linien, Pässe als
-// Punkte, Fotos dort, wo sie aufgenommen wurden. Die Punkte liegen als
-// unsichtbare Schaltflächen über dem Bild – das Bild selbst bleibt ein
-// gewöhnliches <img>, das der Server fertig ausliefert.
-async function openAllMap() {
-  const dlg = $('#allMapDlg');
-  const img = $('#allMapImg');
-  const spin = $('#allMapSpin');
-  const fail = $('#allMapFail');
-  const stage = $('#allMapStage');
-
-  stage.querySelectorAll('.map-dot').forEach(d => d.remove());
-  fail.hidden = true;
-  img.hidden = false;
-  spin.hidden = false;
-  img.style.visibility = 'hidden';
-  dlg.showModal();
-
-  let meta = null;
+  // Die Straße fehlt noch: nachholen. Das dauert beim ersten Mal ein paar
+  // Sekunden, weil sie bei OpenStreetMap abgefragt wird.
+  if (routeCache.has(p.id)) return;
+  const token = mapToken;
+  mapStatus('Straße wird geladen …');
   try {
-    meta = await req('/api/map/all?meta=1');
+    const { enc } = await req(`/api/map/${encodeURIComponent(p.id)}?route=1`);
+    if (token !== mapToken) return;
+    if (enc) {
+      routeCache.set(p.id, decodePolyline(enc));
+      drawMap();
+      if (mapFocus === p.id) frame(p, true);
+    } else {
+      toast('Für diesen Pass wurde keine Straße gefunden.');
+    }
   } catch (err) {
-    spin.hidden = true;
-    img.hidden = true;
-    fail.hidden = false;
-    fail.textContent = err.code === 'nothing_to_show'
-      ? 'Noch keine Pässe mit Koordinaten.'
-      : message(err);
-    return;
-  }
-
-  img.onload = () => {
-    spin.hidden = true;
-    img.style.visibility = '';
-    placeDots(stage, img, meta);
-  };
-  img.onerror = () => { spin.hidden = true; img.hidden = true; fail.hidden = false; };
-  img.src = '/api/map/all?v=' + MAP_VERSION;
-}
-
-// Die Punkte kommen in Bildkoordinaten; das Bild wird aber skaliert
-// dargestellt. Deshalb in Prozent umrechnen – dann sitzen sie bei jeder Größe.
-function placeDots(stage, img, meta) {
-  stage.querySelectorAll('.map-dot').forEach(d => d.remove());
-  if (!meta || !Array.isArray(meta.marks)) return;
-
-  for (const m of meta.marks) {
-    if (m.x < 0 || m.y < 0 || m.x > meta.w || m.y > meta.h) continue;
-    const dot = document.createElement('button');
-    dot.type = 'button';
-    dot.className = 'map-dot';
-    dot.style.left = (m.x / meta.w * 100) + '%';
-    dot.style.top = (m.y / meta.h * 100) + '%';
-    dot.setAttribute('aria-label', m.kind === 'photo'
-      ? `Foto vom ${m.name || 'Pass'} ansehen`
-      : (m.name || 'Pass'));
-    dot.dataset.kind = m.kind;
-    dot.dataset.id = m.id || '';
-    dot.dataset.pass = m.pass || m.id || '';
-    stage.append(dot);
+    if (token === mapToken) toast(message(err));
+  } finally {
+    if (token === mapToken) mapStatus(null);
   }
 }
 
-$('#allMapStage').addEventListener('click', e => {
-  const dot = e.target.closest('.map-dot');
-  if (!dot) return;
-  if (dot.dataset.kind === 'photo') {
-    $('#allMapDlg').close();
-    openLightbox(dot.dataset.pass, dot.dataset.id);
-  } else {
-    // Auf einen Pass getippt: seine Einzelstrecke zeigen.
-    const p = passes.find(x => x.id === dot.dataset.id);
-    if (!p) return;
-    $('#allMapDlg').close();
-    openMap(p);
-  }
+// Einen Pass so zeigen, dass seine ganze Straße über der Infokarte liegt.
+function frame(p, animate) {
+  const route = routeCache.get(p.id);
+  const pts = route ? route : [{ lat: p.lat, lon: p.lon }];
+  map.fit(pts, { animate, maxZ: route ? 14 : 12, ...insets() });
+}
+
+function unfocus() {
+  mapFocus = null;
+  $('#mvCard').hidden = true;
+  $('#mvTitle').textContent = 'Alle Strecken';
+  $('#mvSub').textContent = mapSummary();
+  map.setActive(null);
+}
+
+function showCard(p) {
+  const place = ranks(passes.slice().sort(byRank)).get(p.id);
+  const media = p.photos || [];
+  const first = media.find(id => !isVideo(id)) || media[0];
+  const score = v => (typeof v === 'number' ? v : '–');
+  const intl = [p.intl ? esc(p.intl) : '', p.lad ? '<span>' + esc(p.lad) + '</span>' : ''].filter(Boolean).join(' · ');
+  const card = $('#mvCard');
+  card.innerHTML = `
+    <header>
+      <div class="title">
+        <h4>${esc(p.de)}</h4>
+        ${intl ? `<p class="intl">${intl}</p>` : ''}
+        ${p.alt || p.region ? `<p class="meta">${p.alt ? `<span class="sign">${esc(p.alt)} m</span>` : ''}${p.region ? `<span class="region">${esc(p.region)}</span>` : ''}</p>` : ''}
+      </div>
+      <button type="button" class="x" data-mv="close" aria-label="Schließen">×</button>
+    </header>
+    ${facts(p)}
+    <p class="mv-scores">
+      ${place != null ? `<span>Platz<b>${place}</b></span>` : ''}
+      <span class="fun">Fahrspaß<b>${score(p.fun)}</b></span>
+      <span>Ambiente<b>${score(p.amb)}</b></span>
+    </p>
+    <div class="row">
+      ${first ? `<button type="button" class="btn" data-mv="photos">${media.length === 1 ? '1 Foto' : `${media.length} Fotos`}</button>` : ''}
+      <a class="btn soft" href="${mapsUrl(p)}" target="_blank" rel="noopener">Navigation</a>
+    </div>`;
+  card.dataset.pass = p.id;
+  card.dataset.photo = first || '';
+  // Beim Wechsel zwischen Pässen soll die Karte neu hereingleiten.
+  card.hidden = true;
+  void card.offsetWidth;
+  card.hidden = false;
+}
+
+$('#mvCard').addEventListener('click', e => {
+  const t = e.target.closest('[data-mv]');
+  if (!t) return;
+  const card = $('#mvCard');
+  if (t.dataset.mv === 'close') unfocus();
+  else if (t.dataset.mv === 'photos') openLightbox(card.dataset.pass, card.dataset.photo);
 });
 
 $('#openAllMap').onclick = openAllMap;
-$('#allMapClose').onclick = () => $('#allMapDlg').close();
-
-$('#mapClose').onclick = () => $('#mapDlg').close();
-$('#mapDlg').addEventListener('click', e => { if (e.target.id === 'mapDlg') $('#mapDlg').close(); });
+$('#mvClose').onclick = () => $('#mapView').close();
+$('#mvIn').onclick = () => map && map.zoomIn();
+$('#mvOut').onclick = () => map && map.zoomOut();
+$('#mvFit').onclick = () => {
+  if (!map) return;
+  const p = mapFocus && passes.find(x => x.id === mapFocus);
+  if (p) frame(p, true); else fitAll(true);
+};
+$('#mapView').addEventListener('close', () => { mapToken++; mapStatus(null); });
+$('#mapView').addEventListener('keydown', e => {
+  if (!map || e.target.closest('input,textarea,select')) return;
+  if (e.key === '+' || e.key === '=') { e.preventDefault(); map.zoomIn(); }
+  else if (e.key === '-') { e.preventDefault(); map.zoomOut(); }
+});
 
 /* --------------------------------------------------------- Lightbox --- */
 

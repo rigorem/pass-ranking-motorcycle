@@ -21,7 +21,7 @@ api/
   inbox.js             GET/POST – Fotos ohne sichere Zuordnung
   _lib/photos.js       Ablegen im Blob, gemeinsam für Upload und Import
   _lib/inbox.js        Der Eingang
-  map/[id].js          GET  – Kartenbild mit Streckenverlauf
+  map/[id].js          GET  – Kartenbild für die Liste, Streckendaten, Kacheln
   _lib/route.js        Straßenverlauf über den Pass aus OpenStreetMap
   _lib/tilemap.js      Setzt Kacheln zusammen und zeichnet die Strecke darauf
   passes/index.js      GET  – alle Pässe, POST – neuer Pass
@@ -161,7 +161,7 @@ Jede Passkarte hat links neben dem Namen eine Kachel mit dem Streckenverlauf:
 die Passstraße mit ihren Kehren, über eine Karte gelegt. Eigene Fotos stehen
 weiter unten im Streifen – beim Scrollen hilft die Form der Straße beim
 Wiedererkennen mehr als ein Ausschnitt Himmel. Ein Tipp auf die Kachel öffnet
-dieselbe Karte größer, dazu einen Knopf in die Karten-App.
+die große Karte mit diesem Pass im Mittelpunkt (siehe unten).
 
 Unter der Region steht, was die Straße ausmacht, aus dem Verlauf gerechnet:
 Straßennummer, Länge, Kurven, Kehren und Kurven pro Kilometer – beim Stilfser
@@ -184,7 +184,8 @@ den Verlauf nicht, zeigt sie den Pass auf Stufe 12 mit Markierung.
 Straßenverlauf und fertiges Bild werden pro Pass einmal geholt und landen dann
 im privaten Blob-Store, ausgeliefert wie die Fotos über eine Route mit
 Passwortprüfung. Danach kostet ein Aufruf nichts mehr bei fremden Diensten.
-Die Kachel wiegt rund 80 KB, die große Ansicht rund 260 KB.
+Die Kachel wiegt rund 80 KB. Nur sie wird noch auf dem Server gebaut; die
+große Karte zeichnet der Browser selbst.
 
 `api/_lib/route.js` sucht die Straße, auf der der Pass liegt, und läuft von
 dort acht Kilometer in beide Richtungen weiter. An Kreuzungen wird die Straße
@@ -394,24 +395,43 @@ Während ein Dialog offen ist, jemand eine Notiz tippt oder eigene Änderungen
 noch unterwegs sind, wird nicht abgeglichen – sonst überschreibt der Server,
 was gerade erst lokal passiert ist.
 
-## Alle Strecken auf einer Karte
+## Die große Karte
 
-Der Knopf **„Alle Strecken"** über der Liste öffnet eine Karte mit allem, was
-gefahren wurde: jede bekannte Passstraße als Linie, jeder Pass als farbiger
-Punkt, dazu jedes Foto als heller Punkt **an der Stelle, an der es aufgenommen
-wurde**. Ein Tipp auf einen Fotopunkt öffnet das Bild, ein Tipp auf einen
-Passpunkt dessen Streckenansicht.
+Der Knopf **„Alle Strecken"** über der Liste öffnet eine Karte über den ganzen
+Bildschirm: jede bekannte Passstraße in KTM-Orange, jeder Pass als braunes
+Passschild mit seinem Platz in der Rangliste, dazu jedes Foto als runde
+Vorschau **an der Stelle, an der es aufgenommen wurde** – dicht beieinander
+liegende Fotos als Stapel mit Zahl. Verschieben, mit zwei Fingern oder dem
+Mausrad zoomen, Doppeltipp zum Heranfahren.
 
-Gebaut wird die Übersicht nur aus dem, was schon gespeichert ist. Für zwanzig
-Pässe Overpass zu befragen würde jede Laufzeit sprengen – wessen Straßenverlauf
-noch fehlt, erscheint vorerst als Punkt und ergänzt sich, sobald jemand die
-Einzelansicht dieses Passes geöffnet hat.
+Ein Tipp auf ein Passschild fährt an die Straße heran und zeigt unten eine
+Karte mit Höhe, Region, Länge, Kurven, Kehren, Platz und Bewertung, dazu
+„Fotos" und „Navigation" (öffnet die Karten-App). Ein Tipp auf ein Foto öffnet
+die Fotoreihe des Passes; schließt man sie, ist man wieder auf der Karte. Die
+Kachel neben einem Pass in der Liste öffnet dieselbe Karte, gleich auf diesen
+Pass gerichtet.
 
-Das Bild liefert `/api/map/all`, die Punkte dazu `/api/map/all?meta=1` in
-Bildkoordinaten; die Oberfläche legt daraus unsichtbare Schaltflächen über das
-Bild und rechnet in Prozent um, damit sie bei jeder Darstellungsgröße sitzen.
-Zwischengespeichert wird das Ergebnis am Änderungszähler `passes:rev` – ändert
-sich nichts, kostet ein Öffnen nichts.
+**Warum sie schnell ist.** Früher baute der Server ein fertiges Bild – ein
+SVG von rund 400 KB mit eingebetteten Kacheln, jedes Mal neu zusammengesetzt.
+Jetzt liefert er nur noch Daten, und gezeichnet wird im Browser (`map.js`,
+ohne Bibliothek):
+
+- `/api/map/all` gibt die Straßen als kodierte Polylinien (ein paar hundert
+  Byte pro Pass) und die Fotoorte zurück – zwei gesammelte Abfragen an Redis,
+  egal wie viele Fotos es gibt.
+- Die Karte öffnet sofort mit den Pässen, die die Seite ohnehin kennt; Straßen
+  und Fotos kommen einen Augenblick später dazu.
+- Die Grundkarte kommt als 512er-WebP-Kacheln über `/api/map/tile`. Diese Route
+  braucht **keine Anmeldung** – Kartenkacheln enthalten nichts Privates –,
+  dadurch darf Vercels CDN sie einen Monat lang zwischenspeichern. Nach dem
+  ersten Abruf kommen sie also vom nächstgelegenen Rechenzentrum, nicht mehr
+  von MapTiler. Abgerufen werden nur Kacheln im Alpenraum, und der Schlüssel
+  bleibt auf dem Server.
+- Beim Zoomen bleiben die Kacheln der vorigen Stufe als Platzhalter liegen,
+  bis die neuen da sind – es blitzt nichts grau auf.
+
+Fehlt einem Pass die Straße noch, holt die Karte sie nach, sobald man ihn
+antippt (`/api/map/<id>?route=1`), und zeigt so lange „Straße wird geladen …".
 
 Aufnahmeorte stehen unter `photoloc:<id>`; sie werden beim Import mitgeschrieben
 und beim Löschen mit entfernt. Fotos von **vor** dieser Änderung haben keinen

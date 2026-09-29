@@ -17,11 +17,9 @@ const STROKE = '#C94F83';
 
 // Die Kachel in der Liste ist quadratisch – quadratisch rendern, sonst
 // schneidet der Ausschnitt die Strecke an den Seiten ab.
+// Die große Ansicht zeichnet inzwischen der Browser selbst (map.js).
 const SIZES = {
-  thumb: [280, 280],
-  large: [720, 540],
-  // Die Übersicht über alle Pässe braucht mehr Fläche als eine einzelne Strecke.
-  all: [900, 700]
+  thumb: [280, 280]
 };
 
 const blobKey = (id, size) => `map:${id}:${size}`;
@@ -80,6 +78,7 @@ const tileUrl = (z, x, y) =>
   `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/256/${z}/${x}/${y}.png?key=${encodeURIComponent(KEY())}`;
 
 export default async function handler(req, res) {
+  if (String(req.query.id || '') === 'tile') return tile(req, res);
   if (!guard(req, res)) return;
 
   if (req.method !== 'GET') {
@@ -91,6 +90,7 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id_required' });
 
   if (id === 'all') return overview(req, res);
+  if (req.query.route === '1') return routeOnly(req, res, id);
 
   const size = SIZES[req.query.size] ? String(req.query.size) : 'thumb';
   const [W, H] = SIZES[size];
@@ -170,104 +170,115 @@ export default async function handler(req, res) {
   res.status(200).end(data);
 }
 
-// Alle gefahrenen Pässe auf einer Karte: jede bekannte Strecke als Linie, jeder
-// Pass als Punkt, dazu jedes Foto an der Stelle, an der es aufgenommen wurde.
+// ---------------------------------------------------------------- Kacheln --
+
+// Die Übersicht zeichnet der Browser selbst. Die Kacheln dafür laufen über
+// diese Route, damit der MapTiler-Schlüssel auf dem Server bleibt – aber ohne
+// Anmeldung und mit langem öffentlichen Zwischenspeicher: dann liefert das
+// Vercel-CDN jede Kachel nach dem ersten Abruf selbst aus, ohne dass eine
+// Funktion anläuft. Genau das macht die Karte schnell.
 //
-// Gebaut wird nur aus dem, was schon im Speicher liegt. Für zwanzig Pässe
-// Overpass zu befragen würde jede Zeitgrenze sprengen – wessen Straßenverlauf
-// noch fehlt, erscheint vorerst als Punkt und ergänzt sich, sobald jemand die
-// Einzelansicht dieses Passes geöffnet hat.
-const ALL_KEY = size => `map:all:${size}`;
+// Damit daraus kein allgemeiner Gratis-Kacheldienst wird, gibt es nur den
+// Alpenbogen und nur sinnvolle Zoomstufen.
+const TILE_Z = { min: 5, max: 16 };
+const ALPS = { s: 43.0, n: 49.0, w: 4.0, e: 17.5 };
 
+function tileBounds(z, x, y) {
+  const n = 2 ** z;
+  const lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
+  return { w: x / n * 360 - 180, e: (x + 1) / n * 360 - 180, n: lat(y), s: lat(y + 1) };
+}
+
+async function tile(req, res) {
+  const z = Number(req.query.z), x = Number(req.query.x), y = Number(req.query.y);
+  const bad = code => { res.setHeader('Cache-Control', 'no-store'); return res.status(code).end(); };
+
+  if (![z, x, y].every(Number.isInteger)) return bad(400);
+  if (z < TILE_Z.min || z > TILE_Z.max) return bad(404);
+  const span = 2 ** z;
+  if (x < 0 || y < 0 || x >= span || y >= span) return bad(404);
+
+  const b = tileBounds(z, x, y);
+  if (b.e < ALPS.w || b.w > ALPS.e || b.n < ALPS.s || b.s > ALPS.n) return bad(404);
+  if (!KEY()) return bad(501);
+
+  try {
+    // MapTilers 512er-Kacheln als WebP – etwa ein Viertel der Bytes der
+    // PNG-Variante. Doppelt aufgelöst nur für Displays, die das zeigen können.
+    const hi = req.query.r === '2' ? '@2x' : '';
+    const r = await fetch(
+      `https://api.maptiler.com/maps/${encodeURIComponent(STYLE)}/${z}/${x}/${y}${hi}.webp?key=${encodeURIComponent(KEY())}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!r.ok) return bad(502);
+    const body = Buffer.from(await r.arrayBuffer());
+    res.setHeader('Content-Type', r.headers.get('content-type') || 'image/png');
+    res.setHeader('Content-Length', String(body.length));
+    // Eine Woche im Browser, einen Monat am CDN. Kartenbilder ändern sich kaum.
+    res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=2592000, immutable');
+    return res.status(200).end(body);
+  } catch {
+    return bad(502);
+  }
+}
+
+// ------------------------------------------------------------- Übersicht --
+
+// Statt eines fertigen Bildes nur die Daten: Koordinaten und Straßenverläufe
+// als kodierte Polylinien – ein paar hundert Byte je Pass. Gezeichnet wird im
+// Browser, als Vektor, scharf auf jeder Zoomstufe.
+//
+// Gebaut wird nur aus dem, was schon gespeichert ist; für zwanzig Pässe
+// Overpass zu befragen würde jede Laufzeit sprengen. Fehlt ein Verlauf noch,
+// holt ihn die Karte für den einzelnen Pass nach (siehe ?route=1 unten).
 async function overview(req, res) {
-  const [W, H] = SIZES.all;
-  const wantMeta = req.query.meta === '1';
-
-  let rev = 0;
-  try { rev = await getRev(); } catch { /* dann eben ohne Vergleich */ }
-
-  // Zwischenspeicher gilt nur, solange sich an den Pässen nichts geändert hat.
-  try {
-    const raw = await redis.get(ALL_KEY('all'));
-    const cached = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (cached && cached.rev === rev && cached.path) {
-      if (wantMeta) {
-        res.setHeader('Cache-Control', 'no-store');
-        return res.status(200).json({ w: W, h: H, marks: cached.marks || [] });
-      }
-      if (await send(res, cached.path)) return;
-    }
-  } catch { /* neu bauen */ }
-
-  const fail = (code, body) => {
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(code).json(body);
-  };
-  if (!KEY()) return fail(501, { error: 'maps_not_configured' });
-
+  res.setHeader('Cache-Control', 'no-store');
   let passes;
-  try { passes = await listPasses(); }
-  catch (e) { return fail(500, { error: 'store_unavailable', detail: String(e.message || e) }); }
+  try { passes = (await listPasses()).filter(p => typeof p.lat === 'number' && typeof p.lon === 'number'); }
+  catch (e) { return res.status(500).json({ error: 'store_unavailable' }); }
+  if (!passes.length) return res.status(200).json({ passes: [], photos: [] });
 
-  const located = passes.filter(p => typeof p.lat === 'number' && typeof p.lon === 'number');
-  if (!located.length) return fail(404, { error: 'nothing_to_show' });
+  // Zwei gesammelte Abfragen statt einer pro Pass und pro Foto – bei ein paar
+  // hundert Fotos macht das aus Sekunden Millisekunden.
+  const parse = raw => {
+    if (!raw || raw === 'none') return null;
+    try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
+  };
+  const photoRefs = passes.flatMap(p => (p.photos || [])
+    .filter(id => !isVideoId(id))
+    .map(id => ({ id, pass: p.id })));
 
-  const routes = [];
-  const markers = [];
+  let routes = [], locs = [];
+  try {
+    [routes, locs] = await Promise.all([
+      redis.mget(...passes.map(p => routeKey(p.id))),
+      photoRefs.length ? redis.mget(...photoRefs.map(r => locKey(r.id))) : []
+    ]);
+  } catch { /* dann eben ohne Linien und Fotos */ }
 
-  for (const p of located) {
-    markers.push({ lat: p.lat, lon: p.lon, kind: 'pass', id: p.id, name: p.de });
-    try {
-      const raw = await redis.get(routeKey(p.id));
-      if (raw && raw !== 'none') {
-        const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (v.enc) routes.push(decodePolyline(v.enc));
-      }
-    } catch { /* ohne Linie halt nur der Punkt */ }
-  }
-
-  // Fotos an ihren Aufnahmeort setzen. Videos haben keinen.
-  for (const p of passes) {
-    for (const photoId of p.photos || []) {
-      if (isVideoId(photoId)) continue;
-      try {
-        const raw = await redis.get(locKey(photoId));
-        if (!raw) continue;
-        const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (typeof v.lat === 'number' && typeof v.lon === 'number') {
-          markers.push({ lat: v.lat, lon: v.lon, kind: 'photo', id: photoId, pass: p.id, name: p.de });
-        }
-      } catch { /* dieses Foto eben ohne Punkt */ }
+  const outPasses = passes.map((p, i) => ({
+    id: p.id, de: p.de, alt: p.alt, lat: p.lat, lon: p.lon,
+    fun: p.fun, amb: p.amb, enc: parse(routes[i])?.enc || null
+  }));
+  const outPhotos = [];
+  photoRefs.forEach((r, i) => {
+    const v = parse(locs[i]);
+    if (v && typeof v.lat === 'number' && typeof v.lon === 'number') {
+      outPhotos.push({ id: r.id, pass: r.pass, lat: v.lat, lon: v.lon });
     }
-  }
+  });
 
-  let built;
-  try {
-    built = await renderMap({ routes, markers, width: W, height: H, tileUrl, stroke: STROKE });
-  } catch (e) {
-    return fail(502, { error: 'map_unavailable', detail: String(e.message || e) });
-  }
+  return res.status(200).json({ passes: outPasses, photos: outPhotos });
+}
 
-  const data = Buffer.from(built.svg, 'utf8');
-  try {
-    const blob = await put(`maps/all.svg`, data, {
-      access: 'private', addRandomSuffix: true, contentType: 'image/svg+xml', allowOverwrite: true
-    });
-    const old = await redis.get(ALL_KEY('all'));
-    await redis.set(ALL_KEY('all'), JSON.stringify({ rev, path: blob.pathname, marks: built.marks }));
-    // Das vorherige Bild wegräumen, sonst sammeln sich die alten Stände an.
-    try {
-      const prev = typeof old === 'string' ? JSON.parse(old) : old;
-      if (prev && prev.path && prev.path !== blob.pathname) await deleteBlob(String(prev.path));
-    } catch { /* egal */ }
-  } catch { /* dann eben beim nächsten Mal wieder bauen */ }
-
-  if (wantMeta) {
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({ w: W, h: H, marks: built.marks });
-  }
-  res.setHeader('Content-Type', 'image/svg+xml');
-  res.setHeader('Content-Length', String(data.length));
-  res.setHeader('Cache-Control', 'private, max-age=300');
-  return res.status(200).end(data);
+// Den Straßenverlauf eines einzelnen Passes nachholen, wenn er noch fehlt.
+// Die Karte zeigt sich sofort und zeichnet die Straße nach, sobald sie da ist.
+async function routeOnly(req, res, id) {
+  res.setHeader('Cache-Control', 'no-store');
+  let pass;
+  try { pass = await getPass(id); } catch { return res.status(500).json({ error: 'store_unavailable' }); }
+  if (!pass) return res.status(404).json({ error: 'not_found' });
+  if (typeof pass.lat !== 'number') return res.status(404).json({ error: 'no_coordinates' });
+  const { enc } = await polylineFor(id, pass);
+  return res.status(200).json({ id, enc: enc || null });
 }
